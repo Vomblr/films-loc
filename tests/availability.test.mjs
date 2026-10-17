@@ -86,6 +86,10 @@ test('availability deduplicates requests, persists results, expires them, and do
   clock += 25 * 3600000; assert.equal(restarted.isFresh(input.url), false); assert.equal(restarted.peek(input.url).stale, true);
   const failed = createAvailabilityLookup({ fetchImpl: async () => { throw new Error('network'); } });
   assert.equal((await failed.lookup(input)).status, 'unknown');
+  for (const status of [401, 403, 429, 503]) {
+    const blocked = createAvailabilityLookup({ fetchImpl: async () => new Response('', { status }) });
+    const result = await blocked.lookup(input); assert.equal(result.status, 'unknown'); assert.equal(result.reason, 'blocked');
+  }
   await assert.rejects(lookup.lookup({ url: 'https://127.0.0.1/admin' }));
   const disabled = createAvailabilityLookup({ enabled: false, fetchImpl: () => { throw new Error('No network expected'); } });
   assert.equal((await disabled.lookup(input)).status, 'unknown');

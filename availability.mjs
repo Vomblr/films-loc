@@ -51,7 +51,8 @@ export function createAvailabilityLookup({ records = [], onResult = () => {}, no
       try {
         // The public /film/ID/watch/ resolver also accepts series IDs.
         const page = await fetchKinopoiskPage(`https://www.kinopoisk.ru/film/${input.id}/watch/`, { fetchImpl, signal: AbortSignal.timeout(8500) });
-        result = page.status === 200 ? parseAvailabilityPage(page.html, input.id, page.url) : { status: 'unknown', reason: 'http-error' };
+        result = page.status === 200 ? parseAvailabilityPage(page.html, input.id, page.url)
+          : { status: 'unknown', reason: [401, 403, 429, 503].includes(page.status) ? 'blocked' : 'http-error' };
       } catch (error) { result = { status: 'unknown', reason: ['challenge', 'non_anonymous_sso'].includes(error.code) ? 'blocked' : 'network-error' }; }
       const entry = { id: input.id, ...result, watchUrl: result.watchUrl || null, source: 'kinopoisk', checkedAt: new Date(now()).toISOString() };
       if (cache.size >= 1000 && !cache.has(input.id)) cache.delete(cache.keys().next().value);
