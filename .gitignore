@@ -1,0 +1,16 @@
+# Runtime data and backups never belong in Git.
+data/
+.test-data/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+*.pid
+node_modules/
+hosting.local.json
+*.local.json
+.DS_Store
+Thumbs.db

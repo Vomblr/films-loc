@@ -1,0 +1,62 @@
+[
+  {
+    "id": "447301",
+    "russianTitle": "Начало",
+    "originalTitle": "Inception",
+    "kind": "film",
+    "season": null,
+    "releaseYear": 2010,
+    "premiereDate": "2010-07-08",
+    "yearKind": "film-premiere",
+    "kinopoiskUrl": "https://www.kinopoisk.ru/film/447301/",
+    "source": "Проверенный каталог",
+    "sourceUrl": "https://www.wikidata.org/wiki/Q25188",
+    "warnings": [],
+    "verifiedAt": "2026-10-17"
+  },
+  {
+    "id": "404900",
+    "russianTitle": "Во все тяжкие",
+    "originalTitle": "Breaking Bad",
+    "kind": "series",
+    "season": null,
+    "releaseYear": 2008,
+    "premiereDate": "2008-01-20",
+    "yearKind": "series-start",
+    "kinopoiskUrl": "https://www.kinopoisk.ru/series/404900/",
+    "source": "Проверенный каталог",
+    "sourceUrl": "https://www.wikidata.org/wiki/Q1079",
+    "warnings": [],
+    "verifiedAt": "2026-10-17"
+  },
+  {
+    "id": "915196",
+    "russianTitle": "Очень странные дела",
+    "originalTitle": "Stranger Things",
+    "kind": "series",
+    "season": null,
+    "releaseYear": 2016,
+    "premiereDate": "2016-07-15",
+    "yearKind": "series-start",
+    "kinopoiskUrl": "https://www.kinopoisk.ru/series/915196/",
+    "source": "Проверенный каталог",
+    "sourceUrl": "https://www.wikidata.org/wiki/Q19798734",
+    "warnings": [],
+    "verifiedAt": "2026-10-17"
+  },
+  {
+    "id": "915196",
+    "russianTitle": "Очень странные дела",
+    "originalTitle": "Stranger Things",
+    "kind": "series",
+    "season": 2,
+    "releaseYear": 2017,
+    "premiereDate": "2017-10-27",
+    "yearKind": "season-release",
+    "kinopoiskUrl": "https://www.kinopoisk.ru/series/915196/",
+    "source": "Проверенный каталог",
+    "sourceUrl": "https://www.wikidata.org/wiki/Q42155612",
+    "warnings": [],
+    "verifiedAt": "2026-10-17"
+  }
+]

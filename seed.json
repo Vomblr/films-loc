@@ -1,0 +1,96 @@
+{
+  "description": "Illustrative demo only. Dates and viewing states are fictional.",
+  "films": [
+    {
+      "id": "demo-inception",
+      "title": "Начало (Inception)",
+      "note": "Сны внутри снов и необычное ограбление.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/film/447301/",
+      "releaseYear": 2010,
+      "watched": false,
+      "watchedAt": null,
+      "markedAt": null,
+      "sourceOrder": 0,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-matrix",
+      "title": "Матрица (The Matrix)",
+      "note": "Хакер узнаёт правду о своём мире.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/film/301/",
+      "releaseYear": 1999,
+      "watched": false,
+      "watchedAt": null,
+      "markedAt": null,
+      "sourceOrder": 1,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-interstellar",
+      "title": "Интерстеллар (Interstellar)",
+      "note": "Космическая экспедиция ищет новый дом.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/film/258687/",
+      "releaseYear": 2014,
+      "watched": false,
+      "watchedAt": null,
+      "markedAt": null,
+      "sourceOrder": 2,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-breaking-bad",
+      "title": "Во все тяжкие (Breaking Bad)",
+      "note": "Учитель химии начинает опасную вторую жизнь.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/series/404900/",
+      "releaseYear": 2008,
+      "watched": false,
+      "watchedAt": null,
+      "markedAt": null,
+      "sourceOrder": 3,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-stranger-things-s2",
+      "title": "Очень странные дела, 2 сезон (Stranger Things)",
+      "note": "Друзья противостоят тайнам маленького города.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/series/915196/",
+      "releaseYear": 2017,
+      "watched": false,
+      "watchedAt": null,
+      "markedAt": null,
+      "sourceOrder": 4,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-spirited-away",
+      "title": "Унесённые призраками (Sen to Chihiro no kamikakushi)",
+      "note": "Девочка оказывается в мире духов.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/film/370/",
+      "releaseYear": 2001,
+      "watched": true,
+      "watchedAt": "2025-06-08",
+      "markedAt": "2025-06-08T18:00:00.000Z",
+      "sourceOrder": 5,
+      "sourceText": null,
+      "additionalLinks": []
+    },
+    {
+      "id": "demo-stranger-things",
+      "title": "Очень странные дела (Stranger Things)",
+      "note": "Исчезновение мальчика раскрывает секретный эксперимент.",
+      "kinopoiskUrl": "https://www.kinopoisk.ru/series/915196/",
+      "releaseYear": 2016,
+      "watched": true,
+      "watchedAt": "2025-06-08",
+      "markedAt": "2025-06-08T18:00:00.000Z",
+      "sourceOrder": 6,
+      "sourceText": null,
+      "additionalLinks": []
+    }
+  ]
+}

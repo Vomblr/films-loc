@@ -1,0 +1,5 @@
+# Optional HTTP entry point for a trusted home network.
+# Point films.loc at your server in your local DNS first.
+http://films.loc {
+    reverse_proxy 127.0.0.1:8766
+}

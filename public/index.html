@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f7f3">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Фильмы">
+  <meta name="description" content="Наш домашний список фильмов и сериалов.">
+  <title>Фильмы · films.loc</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="brand"><span class="brand-icon" aria-hidden="true">f.</span><span>films<span class="domain">.loc</span></span><span class="home-label">ДОМАШНЯЯ КИНОТЕКА</span></div>
+      <div class="heading"><h1>Что посмотрим?</h1><p id="summary">Загружаем ваш список…</p></div>
+    </header>
+
+    <section class="add-card" aria-label="Добавить фильм">
+      <form id="add-form">
+        <div class="quick-add"><label class="sr-only" for="add-title">Название или ссылка на Кинопоиск</label><input id="add-title" name="title" placeholder="Название или ссылка…" required maxlength="250" autocomplete="off"><button class="add-button" aria-label="Добавить фильм" title="Добавить фильм" type="submit">+</button></div>
+        <details id="add-details"><summary>Год, ссылка и заметка <span aria-hidden="true">+</span></summary><div class="detail-fields"><label for="add-url">Ссылка на Кинопоиск <span>заполнит название и год</span></label><div class="lookup-row"><input id="add-url" name="kinopoiskUrl" type="url" inputmode="url" placeholder="https://www.kinopoisk.ru/film/…" maxlength="2048"><button id="fill-metadata" type="button" class="secondary-button">Заполнить</button></div><div id="season-fields" hidden><label for="add-season">Сезон <span>пусто — сериал целиком</span></label><input id="add-season" type="number" inputmode="numeric" min="1" max="100" placeholder="Например, 2"></div><label for="add-year">Год премьеры / сезона <span>необязательно</span></label><input id="add-year" name="releaseYear" type="number" inputmode="numeric" min="1888" max="2100" placeholder="Первая премьера"><label for="add-note">Заметка <span>необязательно</span></label><textarea id="add-note" name="note" rows="2" placeholder="Кто посоветовал, что зацепило…" maxlength="3000"></textarea></div></details>
+        <p id="metadata-status" class="metadata-status" role="status" aria-live="polite" hidden></p>
+        <p id="add-error" class="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="collection" aria-label="Список фильмов">
+      <div class="tabs" role="group" aria-label="Показать фильмы"><button data-filter="all" aria-pressed="true">Все <span id="count-all">—</span></button><button data-filter="planned" aria-pressed="false">В планах <span id="count-planned">—</span></button><button data-filter="watched" aria-pressed="false">Просмотрено <span id="count-watched">—</span></button><button data-filter="trash" aria-pressed="false">Корзина <span id="count-trash">—</span></button></div>
+      <div class="tools"><div class="search-wrap"><svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><label class="sr-only" for="search">Поиск по списку</label><input id="search" type="search" placeholder="Найти в списке" autocomplete="off"></div><label class="sort-wrap"><span class="sr-only">Сортировка</span><select id="sort"><option value="note">Порядок заметки</option><option value="watched-desc">Просмотр: сначала новые</option><option value="watched-asc">Просмотр: сначала старые</option><option value="title">По названию</option></select></label></div>
+      <p id="connection" class="connection" role="status" hidden></p>
+      <div id="film-list" aria-busy="true"><div class="loading">Открываем кинотеку…</div></div>
+      <div id="empty" class="empty" hidden><span aria-hidden="true">○</span><h2>Пока ничего</h2><p id="empty-text">Добавьте первый фильм в строке выше.</p></div>
+    </section>
+    <footer><span>Хорошее кино подождёт своего вечера.</span><a href="/api/export" download>Скачать копию <span aria-hidden="true">↓</span></a></footer>
+  </main>
+
+  <dialog id="edit-dialog" aria-labelledby="edit-heading"><form id="edit-form"><div class="dialog-header"><h2 id="edit-heading">О фильме</h2><button id="close-edit" class="icon-button" type="button" aria-label="Закрыть">×</button></div><label for="edit-title">Название</label><input id="edit-title" required maxlength="250"><label for="edit-year">Год премьеры / сезона</label><input id="edit-year" type="number" inputmode="numeric" min="1888" max="2100" placeholder="Для сериала — год начала"><label for="edit-note">Заметка</label><textarea id="edit-note" rows="3" maxlength="3000"></textarea><label for="edit-url">Ссылка на Кинопоиск</label><input id="edit-url" type="url" inputmode="url" placeholder="https://www.kinopoisk.ru/film/…" maxlength="2048"><div id="date-fields" hidden><label for="edit-date">Дата просмотра</label><input id="edit-date" type="date"><p class="field-hint">Для старых отметок дату можно оставить пустой.</p><p id="marked-info" class="field-hint"></p></div><p id="edit-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button id="delete-film" class="delete-button" type="button">Удалить</button><button id="cancel-edit" class="secondary-button" type="button">Отмена</button><button class="primary-button" type="submit">Сохранить</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" hidden><span id="toast-text"></span><button id="undo" type="button" hidden>Отменить</button></div>
+  <dialog id="torrent-dialog" aria-labelledby="torrent-heading"><div class="dialog-header"><h2 id="torrent-heading">Запрос для torrent-бота</h2><button id="close-torrent" class="icon-button" type="button" aria-label="Закрыть запрос">×</button></div><label for="torrent-message">Сообщение для бота</label><textarea id="torrent-message" rows="3" readonly></textarea><p id="torrent-copy-status" class="field-hint" role="status"></p><div class="dialog-actions"><button id="copy-torrent" type="button" class="secondary-button">Скопировать</button><a id="open-torrent-bot" class="primary-button" href="https://t.me/torrents_2_bot" target="_blank" rel="noopener noreferrer">Открыть бота ↗</a></div></dialog>
+</body>
+</html>
