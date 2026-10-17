@@ -4,13 +4,14 @@
 
 ## Configuration
 
-The server reads three environment variables. It does not load `.env` files automatically.
+The server reads the following environment variables. It does not load `.env` files automatically.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Interface to listen on. |
 | `PORT` | `8766` | HTTP port. |
 | `FILMS_DATA_DIR` | `<project>/data` | SQLite, backups, and runtime files. Use an absolute path for predictable service setups. |
+| `FILMS_AVAILABILITY_NETWORK` | enabled | Set to `0` to disable outbound Kinopoisk availability checks and background sweeps. Cached results and manual choices remain readable. |
 
 ### Windows
 
@@ -83,6 +84,7 @@ Open the site in Safari, then use **Share → Add to Home Screen**. A web manife
 | PC works, phone does not | LAN binding, same network, firewall scope, guest-network isolation, and PC sleep state. |
 | IP works, name does not | Local DNS record and the DNS resolver used by the device. |
 | Metadata fields stay empty | Inspect the message under the form. Wikidata might have no exact match, original title, or season date. Manual entry still works. |
+| Kinopoisk shows a question mark | The source could not confirm an offer. Open the editor to retry, inspect the check time, or set a manual confirmation. Challenges are never treated as proof of unavailability. |
 | An edit is rejected | Another device changed the same entry. Reload and retry using the current version. |
 | Telegram opens without a query | Start the bot if necessary, paste the copied query, then press Send. Client support for prepared text varies. |
 | Clipboard fallback appears | Select/copy the shown text manually. The LAN HTTP site cannot rely on the modern HTTPS-only Clipboard API. |

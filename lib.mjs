@@ -25,6 +25,10 @@ export function validateFilm(input, previous = {}) {
     if (kinopoiskUrl.length > 2048) throw new Error('Ссылка слишком длинная.');
   }
   if (input.watched !== undefined && typeof input.watched !== 'boolean') throw new Error('Некорректный статус.');
+  const kinopoiskAvailabilityOverride = input.kinopoiskAvailabilityOverride !== undefined ? input.kinopoiskAvailabilityOverride
+    : kinopoiskUrl === previous.kinopoiskUrl ? previous.kinopoiskAvailabilityOverride ?? null : null;
+  if (![null, 'available', 'unavailable'].includes(kinopoiskAvailabilityOverride)) throw new Error('Проверьте доступность просмотра на Кинопоиске.');
+  if (kinopoiskAvailabilityOverride && !kinopoiskUrl) throw new Error('Сначала добавьте ссылку на Кинопоиск.');
   const watched = input.watched ?? previous.watched ?? false;
   const watchedAt = watched ? (input.watchedAt !== undefined ? input.watchedAt : previous.watchedAt ?? null) : null;
   if (watchedAt !== null) {
@@ -32,7 +36,7 @@ export function validateFilm(input, previous = {}) {
       throw new Error('Проверьте дату просмотра.');
     if (watchedAt > new Date(Date.now() + 14 * 3600000).toISOString().slice(0, 10)) throw new Error('Дата просмотра не может быть в будущем.');
   }
-  return { title, note, kinopoiskUrl, watched, watchedAt, releaseYear, additionalLinks };
+  return { title, note, kinopoiskUrl, watched, watchedAt, releaseYear, additionalLinks, kinopoiskAvailabilityOverride };
 }
 
 export function toFilm(row) {
@@ -40,7 +44,9 @@ export function toFilm(row) {
     watched: Boolean(row.watched), watchedAt: row.watched_at, markedAt: row.marked_at,
     createdAt: row.created_at, updatedAt: row.updated_at, version: row.version,
     sourceOrder: row.source_order, sourceText: row.source_text, releaseYear: row.release_year ?? null,
-    deletedAt: row.deleted_at ?? null, additionalLinks: JSON.parse(row.additional_links || '[]') };
+    deletedAt: row.deleted_at ?? null, additionalLinks: JSON.parse(row.additional_links || '[]'),
+    kinopoiskAvailabilityOverride: row.kinopoisk_availability_override ?? null,
+    kinopoiskAvailabilityMarkedAt: row.kinopoisk_availability_marked_at ?? null };
 }
 
 export function isPrivateAddress(value = '') {

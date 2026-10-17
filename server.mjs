@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateFilm, toFilm, isPrivateAddress } from './lib.mjs';
 import { createMetadataLookup } from './metadata.mjs';
+import { createAvailabilityLookup } from './availability.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const lookupMetadata = createMetadataLookup({ catalog: JSON.parse(readFileSync(path.join(root, 'metadata-catalog.json'), 'utf8')) });
@@ -18,10 +19,12 @@ db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=F
     watched INTEGER NOT NULL DEFAULT 0, watched_at TEXT, marked_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     source_order INTEGER NOT NULL, source_text TEXT, version INTEGER NOT NULL DEFAULT 1
   );
-  CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS kinopoisk_availability (id TEXT PRIMARY KEY, result TEXT NOT NULL);`);
 
 const columns = new Set(db.prepare('PRAGMA table_info(films)').all().map(column => column.name));
-for (const [name, type] of [['release_year', 'INTEGER'], ['deleted_at', 'TEXT'], ['additional_links', "TEXT NOT NULL DEFAULT '[]'"]]) {
+for (const [name, type] of [['release_year', 'INTEGER'], ['deleted_at', 'TEXT'], ['additional_links', "TEXT NOT NULL DEFAULT '[]'"],
+  ['kinopoisk_availability_override', 'TEXT'], ['kinopoisk_availability_marked_at', 'TEXT']]) {
   if (!columns.has(name)) db.exec(`ALTER TABLE films ADD COLUMN ${name} ${type}`);
 }
 
@@ -37,8 +40,38 @@ if (!db.prepare("SELECT value FROM metadata WHERE key='seeded'").get()) {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
-const allFilms = (trash = false) => db.prepare(`SELECT * FROM films WHERE deleted_at IS ${trash ? 'NOT ' : ''}NULL ORDER BY source_order`).all().map(toFilm);
-const snapshot = () => ({ schemaVersion: 2, exportedAt: new Date().toISOString(), films: allFilms(), trash: allFilms(true) });
+const availabilityCache = db.prepare('SELECT result FROM kinopoisk_availability').all().flatMap(row => { try { return [JSON.parse(row.result)]; } catch { return []; } });
+const availability = createAvailabilityLookup({ records: availabilityCache, enabled: process.env.FILMS_AVAILABILITY_NETWORK !== '0',
+  onResult: entry => db.prepare('INSERT INTO kinopoisk_availability (id,result) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result').run(entry.id, JSON.stringify(entry)) });
+function filmWithAvailability(row) {
+  const film = toFilm(row);
+  film.kinopoiskAvailability = film.kinopoiskAvailabilityOverride ? { status: film.kinopoiskAvailabilityOverride,
+    checkedAt: film.kinopoiskAvailabilityMarkedAt, source: 'manual', reason: 'user-confirmed', watchUrl: null, stale: false }
+    : availability.peek(film.kinopoiskUrl);
+  return film;
+}
+const allFilms = (trash = false) => db.prepare(`SELECT * FROM films WHERE deleted_at IS ${trash ? 'NOT ' : ''}NULL ORDER BY source_order`).all().map(filmWithAvailability);
+const snapshot = () => ({ schemaVersion: 3, exportedAt: new Date().toISOString(), films: allFilms(), trash: allFilms(true) });
+async function checkFilmAvailability(film) {
+  if (film.kinopoiskUrl && !film.kinopoiskAvailabilityOverride && availability.peek(film.kinopoiskUrl).reason !== 'no-card')
+    await availability.lookup({ url: film.kinopoiskUrl });
+}
+let availabilityRefreshing = false, stopping = false;
+async function refreshAvailability() {
+  if (availabilityRefreshing || !availability.enabled || stopping) return;
+  availabilityRefreshing = true;
+  try {
+    const urls = new Set(allFilms().filter(f => !f.kinopoiskAvailabilityOverride && f.kinopoiskUrl).map(f => f.kinopoiskUrl));
+    for (const url of urls) {
+      if (stopping) break;
+      if (availability.isFresh(url)) continue;
+      const result = await availability.lookup({ url });
+      if (result.reason === 'blocked' || result.reason === 'network-error') break;
+      await new Promise(resolve => { const timer = setTimeout(resolve, 750); timer.unref(); });
+    }
+  } catch (error) { console.error('Availability refresh:', error.code || 'lookup failed'); }
+  finally { availabilityRefreshing = false; }
+}
 function dailyBackup() {
   const filename = path.join(dataDir, 'backups', `${new Date().toISOString().slice(0, 10)}.json`);
   if (!existsSync(filename)) writeFileSync(filename, JSON.stringify(snapshot(), null, 2), { encoding: 'utf8', flag: 'wx' });
@@ -50,6 +83,7 @@ const assets = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
   ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']], ['/sort.mjs', ['sort.mjs', 'text/javascript; charset=utf-8']],
   ['/torrent.mjs', ['torrent.mjs', 'text/javascript; charset=utf-8']],
+  ['/availability.mjs', ['availability.mjs', 'text/javascript; charset=utf-8']],
   ['/apple-touch-icon.png', ['apple-touch-icon.png', 'image/png']]
 ]);
 const securityHeaders = {
@@ -86,6 +120,8 @@ const server = http.createServer(async (req, res) => {
       const metadata = await lookupMetadata(await readBody(req));
       return json(res, 200, { metadata });
     }
+    if (req.method === 'POST' && url.pathname === '/api/kinopoisk/availability')
+      return json(res, 200, { availability: await availability.lookup(await readBody(req)) });
     if (req.method === 'GET' && url.pathname === '/api/export') {
       res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="films-${new Date().toISOString().slice(0, 10)}.json"` });
       return res.end(JSON.stringify(snapshot(), null, 2));
@@ -93,12 +129,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/films') {
       const body = await readBody(req);
       const f = validateFilm(body);
+      await checkFilmAvailability(f);
       const now = new Date().toISOString(), id = randomUUID();
       dailyBackup();
       const order = db.prepare('SELECT COALESCE(MAX(source_order),0)+1 AS n FROM films').get().n;
-      db.prepare('INSERT INTO films (id,title,note,kinopoisk_url,watched,watched_at,marked_at,created_at,updated_at,source_order,release_year,additional_links) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(id, f.title, f.note, f.kinopoiskUrl, Number(f.watched), f.watchedAt, f.watched ? now : null, now, now, order, f.releaseYear, JSON.stringify(f.additionalLinks));
-      return json(res, 201, { film: toFilm(db.prepare('SELECT * FROM films WHERE id=?').get(id)) });
+      db.prepare('INSERT INTO films (id,title,note,kinopoisk_url,watched,watched_at,marked_at,created_at,updated_at,source_order,release_year,additional_links,kinopoisk_availability_override,kinopoisk_availability_marked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, f.title, f.note, f.kinopoiskUrl, Number(f.watched), f.watchedAt, f.watched ? now : null, now, now, order, f.releaseYear, JSON.stringify(f.additionalLinks), f.kinopoiskAvailabilityOverride, f.kinopoiskAvailabilityOverride ? now : null);
+      return json(res, 201, { film: filmWithAvailability(db.prepare('SELECT * FROM films WHERE id=?').get(id)) });
     }
     const match = url.pathname.match(/^\/api\/films\/([\w-]+)$/);
     if (req.method === 'PATCH' && match) {
@@ -109,13 +146,17 @@ const server = http.createServer(async (req, res) => {
       if (body.version !== old.version) return json(res, 409, { error: 'Запись уже изменена на другом устройстве. Обновите список и повторите.' });
       if (body.deleted !== undefined && typeof body.deleted !== 'boolean') return json(res, 400, { error: 'Некорректный статус удаления.' });
       if (old.deletedAt && body.deleted !== false) return json(res, 409, { error: 'Фильм в корзине. Сначала восстановите его.' });
-      const f = validateFilm(body, old), now = new Date().toISOString();
+      const f = validateFilm(body, old);
+      if (f.kinopoiskUrl !== old.kinopoiskUrl || (old.kinopoiskAvailabilityOverride && !f.kinopoiskAvailabilityOverride)) await checkFilmAvailability(f);
+      const now = new Date().toISOString();
+      const availabilityMarkedAt = f.kinopoiskAvailabilityOverride ? (f.kinopoiskAvailabilityOverride === old.kinopoiskAvailabilityOverride && f.kinopoiskUrl === old.kinopoiskUrl ? old.kinopoiskAvailabilityMarkedAt : now) : null;
       const markedAt = f.watched ? (old.watched ? old.markedAt : now) : null;
       const deletedAt = body.deleted === true ? now : body.deleted === false ? null : old.deletedAt;
       dailyBackup();
-      db.prepare('UPDATE films SET title=?,note=?,kinopoisk_url=?,watched=?,watched_at=?,marked_at=?,updated_at=?,release_year=?,deleted_at=?,additional_links=?,version=version+1 WHERE id=?')
-        .run(f.title, f.note, f.kinopoiskUrl, Number(f.watched), f.watchedAt, markedAt, now, f.releaseYear, deletedAt, JSON.stringify(f.additionalLinks), old.id);
-      return json(res, 200, { film: toFilm(db.prepare('SELECT * FROM films WHERE id=?').get(old.id)) });
+      const changed = db.prepare('UPDATE films SET title=?,note=?,kinopoisk_url=?,watched=?,watched_at=?,marked_at=?,updated_at=?,release_year=?,deleted_at=?,additional_links=?,kinopoisk_availability_override=?,kinopoisk_availability_marked_at=?,version=version+1 WHERE id=? AND version=?')
+        .run(f.title, f.note, f.kinopoiskUrl, Number(f.watched), f.watchedAt, markedAt, now, f.releaseYear, deletedAt, JSON.stringify(f.additionalLinks), f.kinopoiskAvailabilityOverride, availabilityMarkedAt, old.id, old.version);
+      if (!changed.changes) return json(res, 409, { error: 'Запись уже изменена на другом устройстве. Обновите список и повторите.' });
+      return json(res, 200, { film: filmWithAvailability(db.prepare('SELECT * FROM films WHERE id=?').get(old.id)) });
     }
     if (['GET', 'HEAD'].includes(req.method) && assets.has(url.pathname)) {
       const [name, type] = assets.get(url.pathname), filename = path.join(root, 'public', name);
@@ -135,5 +176,6 @@ server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 const port = Number(process.env.PORT || 8766), bind = process.env.HOST || '127.0.0.1';
 server.on('error', error => { console.error(error.message); process.exitCode = 1; });
-server.listen(port, bind, () => console.log(`Films ready: http://127.0.0.1:${port} | data: ${dataDir}`));
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => { db.close(); process.exit(0); }));
+server.listen(port, bind, () => { console.log(`Films ready: http://127.0.0.1:${port} | data: ${dataDir}`); refreshAvailability(); });
+const availabilityTimer = setInterval(refreshAvailability, 15 * 60000); availabilityTimer.unref();
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; clearInterval(availabilityTimer); server.close(() => { db.close(); process.exit(0); }); });

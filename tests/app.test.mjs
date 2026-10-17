@@ -46,7 +46,7 @@ test('API preserves import flags, persists updates across restart, and blocks cr
   let child;
   async function start() {
     child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(root, 'server.mjs')], {
-      env: { ...process.env, FILMS_DATA_DIR: testData, PORT: '18081', HOST: '127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe']
+      env: { ...process.env, FILMS_DATA_DIR: testData, PORT: '18081', HOST: '127.0.0.1', FILMS_AVAILABILITY_NETWORK: '0' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
     child.stdout.on('data', data => { log += data; }); child.stderr.on('data', data => { log += data; });
@@ -65,17 +65,21 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     assert.equal(imported.length, seed.films.length); assert.equal(imported.filter(f => f.watched).length, seed.films.filter(f => f.watched).length);
     assert.ok(imported.every(f => f.watchedAt === null && f.markedAt === null));
     assert.ok(imported.every(f => f.releaseYear === null && f.deletedAt === null));
+    assert.ok(imported.every(f => f.kinopoiskAvailability.status === 'unknown' && f.kinopoiskAvailabilityOverride === null));
     assert.equal(imported.find(f => f.id === seed.films.find(f => !f.watched).id).watched, false);
     assert.equal(imported.find(f => f.id === seed.films.find(f => f.watched).id).watched, true);
     assert.equal((await send('/api/kinopoisk/lookup', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);
     assert.equal((await send('/api/kinopoisk/lookup', 'POST', { url: 'https://127.0.0.1/admin' })).status, 400);
+    assert.equal((await send('/api/kinopoisk/availability', 'POST', { url: 'https://127.0.0.1/admin' })).status, 400);
+    assert.equal((await send('/api/kinopoisk/availability', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);
     const metadataResponse = await send('/api/kinopoisk/lookup', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' });
     assert.equal(metadataResponse.status, 200);
     const lookup = (await metadataResponse.json()).metadata;
     assert.equal(lookup.title, 'Начало (Inception)'); assert.equal(lookup.releaseYear, 2010);
     assert.equal((await (await fetch(origin + '/api/films')).json()).films.length, seed.films.length);
-    const created = await send('/api/films', 'POST', { title: '<script>Проверка</script>', kinopoiskUrl: 'https://www.kinopoisk.ru/film/123/', note: 'API test', releaseYear: 1997 });
+    const created = await send('/api/films', 'POST', { title: '<script>Проверка</script>', kinopoiskUrl: 'https://www.kinopoisk.ru/film/123/', note: 'API test', releaseYear: 1997, kinopoiskAvailabilityOverride: 'available' });
     assert.equal(created.status, 201); const f = (await created.json()).film;
+    assert.equal(f.kinopoiskAvailability.status, 'available'); assert.equal(f.kinopoiskAvailability.source, 'manual'); assert.ok(f.kinopoiskAvailabilityMarkedAt);
     const changed = await send('/api/films/' + f.id, 'PATCH', { version: f.version, watched: true, watchedAt: '2026-01-02' });
     assert.equal(changed.status, 200); const seen = (await changed.json()).film;
     assert.equal(seen.watchedAt, '2026-01-02'); assert.ok(seen.markedAt);
@@ -91,6 +95,7 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     const saved = (await (await fetch(origin + '/api/films')).json()).films.find(item => item.id === f.id);
     assert.equal(saved.title, '<script>Проверка</script>'); assert.equal(saved.watchedAt, '2026-01-02'); assert.equal(saved.markedAt, seen.markedAt);
     assert.equal(saved.releaseYear, 1997);
+    assert.equal(saved.kinopoiskAvailability.status, 'available'); assert.equal(saved.kinopoiskAvailabilityMarkedAt, f.kinopoiskAvailabilityMarkedAt);
     const deletedResponse = await send('/api/films/' + f.id, 'PATCH', { version: saved.version, deleted: true });
     const deleted = (await deletedResponse.json()).film; assert.ok(deleted.deletedAt);
     assert.equal((await (await fetch(origin + '/api/films')).json()).films.length, seed.films.length);
@@ -105,5 +110,8 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     assert.equal((await (await fetch(origin + '/api/trash')).json()).films.length, 0);
     const unwatch = await send('/api/films/' + f.id, 'PATCH', { version: restored.version, watched: false });
     const unmarked = (await unwatch.json()).film; assert.equal(unmarked.watchedAt, null); assert.equal(unmarked.markedAt, null);
+    const relinkedResponse = await send('/api/films/' + f.id, 'PATCH', { version: unmarked.version, kinopoiskUrl: 'https://www.kinopoisk.ru/film/456/' });
+    const relinked = (await relinkedResponse.json()).film;
+    assert.equal(relinked.kinopoiskAvailability.status, 'unknown'); assert.equal(relinked.kinopoiskAvailabilityOverride, null); assert.equal(relinked.kinopoiskAvailabilityMarkedAt, null);
   } finally { await stop(); }
 });

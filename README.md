@@ -27,6 +27,7 @@ The interface is intentionally small: one page, readable text, generous touch ta
 | --- | --- |
 | Fast entry | Add a title immediately, or expand the year, Kinopoisk link, and note fields. |
 | Metadata lookup | A Kinopoisk card ID resolves to Russian and original titles and a release year through a small reviewed cache or Wikidata. No API key. |
+| Watch on Kinopoisk | Checks the public streaming catalogue when a link is added. A play button means confirmed availability; unavailable and unknown results stay distinct. |
 | Sensible years | Films use the earliest known premiere; series use the first broadcast year; selected seasons use their own release year. |
 | Watch history | Stores the viewing date separately from the timestamp when the watched mark was added. Unknown historical dates can stay empty. |
 | Search & sorting | Search Russian/original names, notes, and years. Sort by viewing date, title, or imported order. Planned items remain above watched items. |
@@ -37,7 +38,7 @@ The interface is intentionally small: one page, readable text, generous touch ta
 
 ## Screenshots
 
-These screenshots use the **included demonstration catalogue**. Viewing states and dates are fictional; no household notes or real watch history are included.
+These screenshots use **public example titles and a demonstration catalogue**. Viewing states and dates are fictional; no household notes or real watch history are included.
 
 <p align="center">
   <img src="docs/images/desktop.jpg" alt="Desktop watchlist with planned films, bilingual titles, years, notes, and action buttons" width="100%">
@@ -117,6 +118,24 @@ Wikidata coverage is incomplete. The earliest known release can differ from a mo
 
 The small checked-in `metadata-catalog.json` contains only public examples. Remote results are cached in memory for up to a day.
 
+## Can I watch it on Kinopoisk?
+
+Paste a Kinopoisk link as usual. Alongside the title and premiere year, the app checks whether that exact title is currently watchable in Kinopoisk's public online catalogue:
+
+| Indicator | Meaning |
+| --- | --- |
+| **▶ Смотреть на Кинопоиске** | A confirmed streaming offer; opens the matching official HD card. |
+| **Кинопоиск · нет онлайн** | The matching public card explicitly reports that it is not watchable. |
+| **Кинопоиск · ?** | Not checked yet, an unavailable source, a challenge, or an unrecognized response. This does not mean the film is unavailable. |
+
+<p align="center"><img src="docs/images/availability.jpg" alt="A confirmed Kinopoisk streaming offer for The Lincoln Lawyer, with its play button" width="340"></p>
+
+Checks also cover existing linked entries in a throttled background pass. Confirmed results are cached in SQLite for 24 hours; unknown results for 15 minutes. A sweep runs at startup and every 15 minutes while the server is running. In **⋯ → Просмотр на Кинопоиске**, inspect the check time, use **Проверить сейчас**, or choose a manual confirmation. Manual choices are preserved across automatic refreshes and reset when the card URL changes.
+
+The detector matches the original numeric Kinopoisk ID and the HD card ID before reading the current-region/current-device `viewOption`. A trailer, a recommendation, or a redirect to an HD page does not count as an offer. Public anonymous SSO navigation uses temporary cookies in memory; account login, browser cookies, API keys, and script execution are not used. CAPTCHA and unexpected authentication stop the check.
+
+Availability can depend on region, account, device, subscription, or purchase. A series-level offer does not confirm every season. The play button indicates catalogue availability, not that your account has paid access. The check uses public page data rather than a supported availability API; source changes safely become unknown results.
+
 ## Telegram shortcut
 
 Each entry has a **torrent** link. It prepares one plain-text query:
@@ -151,6 +170,8 @@ node --disable-warning=ExperimentalWarning --test tests/*.test.mjs
 ```
 
 The tests cover ordering, calendar and URL validation, schema upgrades, persistence across restarts, stale writes, origin checks, deletion/restoration, metadata year selection, unavailable sources, and Telegram query formatting. API tests use an isolated `.test-data/` directory and port **18081**.
+
+Availability tests use synthetic public-page fixtures and mocked HTTP responses. They cover title identity, region/device fields, anonymous SSO cookie scope, blocked responses, cache expiry, and manual overrides; they do not call Kinopoisk during CI.
 
 GitHub Actions runs the suite on Windows and Ubuntu with Node.js 24. No browser framework or package installation is required for the test suite.
 

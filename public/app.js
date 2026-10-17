@@ -1,5 +1,6 @@
 import { sortFilms } from './sort.mjs';
 import { torrentRequests, torrentUrl } from './torrent.mjs';
+import { availabilityPresentation } from './availability.mjs';
 const $ = id => document.getElementById(id);
 let films = [], trash = [], filter = 'all', editing = null, undoAction = null, toastTimer, refreshPending = false;
 let sorting = 'watched-desc';
@@ -13,6 +14,31 @@ const stampLabel = value => new Intl.DateTimeFormat('ru', { dateStyle: 'medium',
 function errorIn(id, error) { $(id).textContent = error?.message || ''; $(id).hidden = !error; }
 let metadataTimer, metadataSequence = 0, metadataPending = null, metadataKey = '', adding = false;
 let autoTitle = null, autoYear = null;
+let availabilitySequence = 0, availabilityKey = '', availabilityPending = null, addAvailability = {};
+const cardKey = text => { try { const u = new URL(text); return u.hostname.replace(/^www\./, '') + ':' + (u.pathname.match(/^\/(?:film|series)\/(\d+)\/?$/)?.[1] || u.pathname); } catch { return text.trim(); } };
+function showAvailability(id, value, override = 'auto') {
+  const presentation = availabilityPresentation(override === 'auto' ? value : { status: override, source: 'manual' });
+  $(id).textContent = presentation.title; $(id).dataset.status = presentation.status; $(id).hidden = false;
+}
+async function fillAvailability(force = false) {
+  const url = $('add-url').value.trim(), key = cardKey(url);
+  if (!url) return;
+  if (!force && availabilityKey === key) return availabilityPending?.promise;
+  const sequence = ++availabilitySequence; availabilityKey = key;
+  $('availability-status').textContent = 'Проверяем доступность просмотра…'; $('availability-status').hidden = false;
+  const promise = (async () => {
+    try {
+      const result = await request('/api/kinopoisk/availability', { method: 'POST', body: JSON.stringify({ url, refresh: force }) });
+      if (sequence !== availabilitySequence || cardKey($('add-url').value) !== key) return;
+      addAvailability = result.availability;
+    } catch { if (sequence === availabilitySequence) addAvailability = { status: 'unknown', checkedAt: new Date().toISOString() }; }
+    finally {
+      if (sequence === availabilitySequence) { availabilityPending = null; showAvailability('availability-status', addAvailability, $('add-availability').value); }
+    }
+  })();
+  availabilityPending = { key, promise }; return promise;
+}
+$('add-availability').addEventListener('change', () => showAvailability('availability-status', addAvailability, $('add-availability').value));
 const looksLikeLink = text => /^https?:\/\//i.test(text.trim());
 const metadataFormKey = () => `${$('add-url').value.trim()}|${$('add-season').value}`;
 function metadataStatus(message, error = false, metadata = null) {
@@ -32,6 +58,10 @@ function resetLookup({ clearAuto = false } = {}) {
   }
   $('fill-metadata').disabled = false; document.querySelector('.add-button').disabled = adding;
   metadataStatus('');
+  if (cardKey($('add-url').value) !== availabilityKey) {
+    availabilitySequence++; availabilityPending = null; availabilityKey = ''; addAvailability = {};
+    $('add-availability').value = 'auto'; $('availability-status').hidden = true;
+  }
 }
 async function fillMetadata(force = false) {
   clearTimeout(metadataTimer);
@@ -42,6 +72,7 @@ async function fillMetadata(force = false) {
   const seasonValue = $('add-season').value;
   $('fill-metadata').disabled = true; document.querySelector('.add-button').disabled = true;
   metadataStatus('Ищем названия и дату премьеры…');
+  const availabilityRequest = fillAvailability(force);
   const promise = (async () => {
     try {
       const { metadata } = await request('/api/kinopoisk/lookup', { method: 'POST', body: JSON.stringify({ url: $('add-url').value.trim(), season: seasonValue ? Number(seasonValue) : null }) });
@@ -66,6 +97,7 @@ async function fillMetadata(force = false) {
       metadataStatus(error.name === 'TimeoutError' ? 'Источник не ответил вовремя. Попробуйте ещё раз или заполните вручную.' : error.message, true);
       $('add-details').open = true;
     } finally {
+      await availabilityRequest;
       if (sequence === metadataSequence) {
         metadataPending = null; $('fill-metadata').disabled = false; document.querySelector('.add-button').disabled = adding;
       }
@@ -161,9 +193,11 @@ function render() {
         content.append(note);
       }
       const meta = make('div', 'film-meta');
-      const link = make('a', 'kp-link', f.kinopoiskUrl ? 'Кинопоиск ↗' : 'Найти на Кинопоиске ↗');
-      link.href = f.kinopoiskUrl || `https://www.kinopoisk.ru/index.php?kp_query=${encodeURIComponent(f.title)}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
-      link.setAttribute('aria-label', `${f.kinopoiskUrl ? 'Кинопоиск' : 'Найти на Кинопоиске'}: ${f.title}`); meta.append(link);
+      const viewing = availabilityPresentation(f.kinopoiskAvailability, Boolean(f.kinopoiskUrl));
+      const link = make('a', `kp-link kp-${viewing.status}`, viewing.label);
+      link.href = viewing.watchUrl || f.kinopoiskUrl || `https://www.kinopoisk.ru/index.php?kp_query=${encodeURIComponent(f.title)}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.title = viewing.title + ' Подписка или покупка зависят от аккаунта и региона; у сериалов уточните нужный сезон.';
+      link.setAttribute('aria-label', `${viewing.label}: ${f.title}. ${viewing.message}`); meta.append(link);
       for (const extra of f.additionalLinks || []) {
         const additional = make('a', 'kp-link', `${extra.label} ↗`); additional.href = extra.url; additional.target = '_blank'; additional.rel = 'noopener noreferrer'; meta.append(additional);
       }
@@ -233,8 +267,12 @@ $('film-list').addEventListener('click', event => {
   if (restoreButton) { const f = trash.find(f => f.id === restoreButton.dataset.restore); if (f) restore(f); }
   if (toggleButton) { const f = films.find(f => f.id === toggleButton.dataset.toggle); if (f) toggle(f); }
   if (editButton) {
+    editAvailabilitySequence++;
     editing = { ...films.find(f => f.id === editButton.dataset.edit) };
     $('edit-title').value = editing.title; $('edit-note').value = editing.note; $('edit-url').value = editing.kinopoiskUrl; $('edit-year').value = editing.releaseYear || '';
+    $('edit-availability').value = editing.kinopoiskAvailabilityOverride || 'auto';
+    showAvailability('edit-availability-status', editing.kinopoiskAvailability);
+    $('check-edit-availability').disabled = !editing.kinopoiskUrl;
     $('date-fields').hidden = !editing.watched; $('edit-date').value = editing.watchedAt || ''; $('edit-date').max = today();
     $('marked-info').textContent = editing.markedAt ? `Отметка поставлена ${stampLabel(editing.markedAt)}` : 'Перенесено из Apple Notes без даты отметки.';
     errorIn('edit-error', null); $('edit-dialog').showModal();
@@ -251,7 +289,7 @@ $('add-form').addEventListener('submit', async event => {
     const title = $('add-title').value.trim();
     if (!title) throw new Error('Введите название фильма.');
     if (looksLikeLink(title)) throw new Error('Не удалось заполнить название по ссылке. Введите его вручную в верхней строке.');
-    const { film } = await request('/api/films', { method: 'POST', body: JSON.stringify({ title, note: $('add-note').value, kinopoiskUrl: $('add-url').value, releaseYear: $('add-year').value ? Number($('add-year').value) : null }) });
+    const { film } = await request('/api/films', { method: 'POST', body: JSON.stringify({ title, note: $('add-note').value, kinopoiskUrl: $('add-url').value, releaseYear: $('add-year').value ? Number($('add-year').value) : null, kinopoiskAvailabilityOverride: $('add-availability').value === 'auto' ? null : $('add-availability').value }) });
     films.push(film); $('add-form').reset(); resetLookup(); autoTitle = autoYear = null; $('season-fields').hidden = true; $('add-details').open = false;
     filter = 'all'; $('search').value = ''; updateTabs(); render(); toast('Добавлено в планы'); $('add-title').focus();
   } catch (e) { errorIn('add-error', e); }
@@ -260,10 +298,27 @@ $('add-form').addEventListener('submit', async event => {
 $('edit-form').addEventListener('submit', async event => {
   event.preventDefault(); errorIn('edit-error', null); event.submitter.disabled = true;
   try {
-    await patch(editing, { title: $('edit-title').value, note: $('edit-note').value, kinopoiskUrl: $('edit-url').value, releaseYear: $('edit-year').value ? Number($('edit-year').value) : null, watchedAt: editing.watched ? $('edit-date').value || null : null });
+    await patch(editing, { title: $('edit-title').value, note: $('edit-note').value, kinopoiskUrl: $('edit-url').value, releaseYear: $('edit-year').value ? Number($('edit-year').value) : null, watchedAt: editing.watched ? $('edit-date').value || null : null, kinopoiskAvailabilityOverride: $('edit-availability').value === 'auto' ? null : $('edit-availability').value });
     $('edit-dialog').close(); toast('Сохранено');
   } catch (e) { errorIn('edit-error', e); }
   finally { event.submitter.disabled = false; }
+});
+let editAvailabilitySequence = 0;
+$('edit-url').addEventListener('input', () => {
+  editAvailabilitySequence++; editing.kinopoiskAvailability = {}; $('edit-availability').value = 'auto'; showAvailability('edit-availability-status', {});
+  $('check-edit-availability').disabled = !$('edit-url').value.trim();
+});
+$('edit-availability').addEventListener('change', () => showAvailability('edit-availability-status', editing?.kinopoiskAvailability, $('edit-availability').value));
+$('check-edit-availability').addEventListener('click', async () => {
+  const sequence = ++editAvailabilitySequence, id = editing?.id, url = $('edit-url').value.trim();
+  $('check-edit-availability').disabled = true; $('edit-availability-status').textContent = 'Проверяем доступность просмотра…';
+  try {
+    const result = await request('/api/kinopoisk/availability', { method: 'POST', body: JSON.stringify({ url, refresh: true }) });
+    if (sequence !== editAvailabilitySequence || editing?.id !== id || $('edit-url').value.trim() !== url) return;
+    editing.kinopoiskAvailability = result.availability;
+    showAvailability('edit-availability-status', result.availability, $('edit-availability').value); await load();
+  } catch { if (sequence === editAvailabilitySequence) showAvailability('edit-availability-status', { status: 'unknown', checkedAt: new Date().toISOString() }); }
+  finally { if (sequence === editAvailabilitySequence) $('check-edit-availability').disabled = !url; }
 });
 $('delete-film').addEventListener('click', async event => {
   event.currentTarget.disabled = true; errorIn('edit-error', null);
