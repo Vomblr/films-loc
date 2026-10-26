@@ -13,6 +13,8 @@
 
 The interface is intentionally small: one page, readable text, generous touch targets, and no poster grid. The UI is currently **in Russian**; this documentation is in English.
 
+The header shows the application version and last deployment time in Moscow time. The timestamp is retained across ordinary restarts and advances when the deployed application files change.
+
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#screenshots">Screenshots</a> ·

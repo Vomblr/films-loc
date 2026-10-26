@@ -9,11 +9,13 @@ import { createMetadataLookup } from './metadata.mjs';
 import { createAvailabilityLookup } from './availability.mjs';
 import { createRatingsLookup } from './ratings.mjs';
 import { createPlannedRefresh } from './planned-refresh.mjs';
+import { deploymentInfo } from './deployment.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const lookupMetadata = createMetadataLookup({ catalog: JSON.parse(readFileSync(path.join(root, 'metadata-catalog.json'), 'utf8')) });
 const dataDir = path.resolve(process.env.FILMS_DATA_DIR || path.join(root, 'data'));
 mkdirSync(path.join(dataDir, 'backups'), { recursive: true });
+const deployment = deploymentInfo(root, dataDir);
 const db = new DatabaseSync(path.join(dataDir, 'films.sqlite'));
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
   CREATE TABLE IF NOT EXISTS films (
@@ -155,6 +157,7 @@ const server = http.createServer(async (req, res) => {
     if (!['GET', 'HEAD'].includes(req.method) && (!req.headers.origin || req.headers.origin !== `http://${host}`))
       return json(res, 403, { error: 'Запрос должен быть отправлен с этого сайта.' });
     const url = new URL(req.url, `http://${host}`);
+    if (req.method === 'GET' && url.pathname === '/api/about') return json(res, 200, deployment);
     if (req.method === 'GET' && url.pathname === '/api/films') return json(res, 200, { films: allFilms() });
     if (req.method === 'GET' && url.pathname === '/api/trash') return json(res, 200, { films: allFilms(true) });
     if (req.method === 'POST' && url.pathname === '/api/kinopoisk/lookup') {

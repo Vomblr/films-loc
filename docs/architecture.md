@@ -22,6 +22,7 @@ The browser uses the same origin for assets and JSON endpoints. It keeps the cur
 | --- | --- |
 | `server.mjs` | HTTP routing, SQLite initialization/migrations, same-origin writes, asset allowlist, export, snapshots. |
 | `lib.mjs` | Record validation, row conversion, private-address checks. |
+| `deployment.mjs` | Package version and a persistent deployment timestamp keyed to application file contents. |
 | `metadata.mjs` | Kinopoisk URL parsing, exact Wikidata ID matching, title/date selection, cache, timeouts, concurrency limit. |
 | `availability.mjs` | Exact-title Kinopoisk streaming-status parsing, persistent-cache interface, expiry, and in-flight deduplication. |
 | `ratings.mjs`, `ratings-parser.mjs` | Exact-title Kinopoisk rating, viewer-review and description parsing, independent field refresh, persistent cache, and expiry. |
@@ -59,6 +60,7 @@ All bodies and responses use JSON. Write requests must have `Content-Type: appli
 
 | Method | Path | Result |
 | --- | --- | --- |
+| `GET` | `/api/about` | `{ "version": "1.1.0", "deployedAt": "<ISO timestamp>" }` for the running deployment. |
 | `GET` | `/api/films` | `{ "films": [...] }` active records. |
 | `GET` | `/api/trash` | `{ "films": [...] }` soft-deleted records. |
 | `GET` | `/api/export` | Downloadable snapshot with active records and Trash. |
@@ -114,6 +116,8 @@ Film release dates are selected from non-deprecated `P577` statements; a regiona
 An exact public Kinopoisk ID match is required. Ambiguous matches fail with a manual-entry message. Network lookups have a time limit, bounded responses, at most three concurrent requests, in-flight deduplication, and a capped one-day memory cache. Reviewed local entries take precedence and carry their verification date.
 
 ## Boundaries
+
+Deployment metadata lives in `data/deployment.json`. On startup the server hashes `package.json`, root JavaScript modules, and public assets; catalogue data and file modification times are excluded. Identical files retain their original deployment time across restarts. Changed files or a package-version change create a new timestamp. Increment `package.json` for a new release and restart after copying the updated files. The header formats the persisted UTC timestamp in `Europe/Moscow`; runtime metadata is excluded from Git with the data directory.
 
 Scores come from the matching `Film`/`TvSeries` entity in the public card's normalized Apollo state. The parser verifies the page ID, root query reference, entity ID, and type. SSR assignments are scanned as balanced JSON, with string escaping handled; source scripts are never executed. Only the Kinopoisk rating is read, not IMDb or critic ratings.
 

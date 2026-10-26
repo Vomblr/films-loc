@@ -17,6 +17,18 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 const dateLabel = value => new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T12:00:00`));
 const stampLabel = value => new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 function errorIn(id, error) { $(id).textContent = error?.message || ''; $(id).hidden = !error; }
+function showDeployment(info) {
+  if (!info?.version || !Number.isFinite(Date.parse(info.deployedAt))) return;
+  const date = new Date(info.deployedAt);
+  const format = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit',
+    year: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  $('app-version').textContent = 'v' + info.version;
+  $('deployed-at').dateTime = info.deployedAt;
+  $('deployed-at').textContent = format.format(date).replace(', ', ' ') + ' МСК';
+  $('release-info').title = 'Последний деплой: ' + new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow',
+    dateStyle: 'long', timeStyle: 'medium' }).format(date) + ' МСК';
+  $('release-info').hidden = false;
+}
 let metadataTimer, metadataSequence = 0, metadataPending = null, metadataKey = '', adding = false;
 let autoTitle = null, autoYear = null, autoNote = null, noteRevision = 0;
 let availabilitySequence = 0, availabilityKey = '', availabilityPending = null, addAvailability = {};
@@ -202,7 +214,9 @@ async function load() {
   if (refreshPending) return;
   refreshPending = true;
   try {
-    const [result, deleted, refresh] = await Promise.all([request('/api/films'), request('/api/trash'), request('/api/kinopoisk/refresh-planned')]);
+    const [result, deleted, refresh, about] = await Promise.all([request('/api/films'), request('/api/trash'),
+      request('/api/kinopoisk/refresh-planned'), request('/api/about').catch(() => null)]);
+    showDeployment(about);
     showPlannedRefresh(refresh.refresh);
     if (JSON.stringify(result.films) !== JSON.stringify(films) || JSON.stringify(deleted.films) !== JSON.stringify(trash) || $('film-list').getAttribute('aria-busy') === 'true') {
       films = result.films; trash = deleted.films; render();
