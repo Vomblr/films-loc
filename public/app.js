@@ -1,9 +1,13 @@
-import { sortFilms } from './sort.mjs';
+import { sortFilms, filmKind, filterFilms } from './sort.mjs';
 import { torrentRequests, torrentUrl } from './torrent.mjs';
 import { availabilityPresentation } from './availability.mjs';
 const $ = id => document.getElementById(id);
 let films = [], trash = [], filter = 'all', editing = null, undoAction = null, toastTimer, refreshPending = false;
 let sorting = 'watched-desc';
+let kindFilter = 'all';
+try { kindFilter = localStorage.getItem('films-kind') || 'all'; } catch {}
+if (!['all', 'film', 'series'].includes(kindFilter)) kindFilter = 'all';
+function rememberKind() { try { localStorage.setItem('films-kind', kindFilter); } catch {} }
 try { sorting = localStorage.getItem('films-sort') || sorting; } catch {}
 if (![...$('sort').options].some(o => o.value === sorting)) sorting = 'watched-desc';
 $('sort').value = sorting;
@@ -165,12 +169,18 @@ function copyTorrentMessage(text) {
 }
 function render() {
   const watched = films.filter(f => f.watched).length;
-  $('count-all').textContent = films.length; $('count-planned').textContent = films.length - watched; $('count-watched').textContent = watched; $('count-trash').textContent = trash.length;
   $('summary').textContent = `${films.length - watched} в планах · ${watched} уже посмотрели`;
-  const query = $('search').value.trim().toLocaleLowerCase('ru').replaceAll('ё', 'е');
+  const query = $('search').value.trim();
+  const typedFilms = filterFilms(films, { kind: kindFilter, query }), typedTrash = filterFilms(trash, { kind: kindFilter, query });
+  const typedWatched = typedFilms.filter(f => f.watched).length;
+  $('count-all').textContent = typedFilms.length; $('count-planned').textContent = typedFilms.length - typedWatched; $('count-watched').textContent = typedWatched; $('count-trash').textContent = typedTrash.length;
   const inTrash = filter === 'trash';
-  const matches = f => `${f.title} ${f.releaseYear || ''} ${f.note}`.toLocaleLowerCase('ru').replaceAll('ё', 'е').includes(query);
-  const selected = inTrash ? trash.filter(matches).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)) : sortFilms(films.filter(f => (filter === 'all' || f.watched === (filter === 'watched')) && matches(f)), sorting);
+  const typeCandidates = filterFilms(inTrash ? trash : films, { status: inTrash ? 'all' : filter, query });
+  for (const button of document.querySelectorAll('[data-kind]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.kind === kindFilter));
+    button.querySelector('span').textContent = filterFilms(typeCandidates, { kind: button.dataset.kind }).length;
+  }
+  const selected = inTrash ? typedTrash.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)) : sortFilms(filterFilms(typedFilms, { status: filter }), sorting);
   const fragment = document.createDocumentFragment();
   for (const status of (inTrash ? [null] : [false, true])) {
     const entries = selected.filter(f => inTrash || f.watched === status);
@@ -220,7 +230,8 @@ function render() {
     fragment.append(section);
   }
   $('film-list').replaceChildren(fragment); $('empty').hidden = selected.length !== 0;
-  $('empty-text').textContent = query ? 'Попробуйте другое название или очистите поиск.' : inTrash ? 'Удалённые фильмы появятся здесь. Их можно будет восстановить.' : filter === 'watched' ? 'Первый просмотренный фильм появится здесь после отметки.' : 'Добавьте фильм в строке выше.';
+  $('empty-text').textContent = query ? 'Попробуйте другое название или измените фильтры.' : kindFilter !== 'all' ? 'Для выбранного типа и статуса записей пока нет. Измените фильтры или добавьте новую запись.' : inTrash ? 'Удалённые фильмы появятся здесь. Их можно будет восстановить.' : filter === 'watched' ? 'Первый просмотренный фильм появится здесь после отметки.' : 'Добавьте фильм в строке выше.';
+  $('reset-filters').hidden = selected.length !== 0 || (kindFilter === 'all' && filter === 'all' && !query);
 }
 $('film-list').addEventListener('click', event => {
   const link = event.target.closest('[data-torrent-query]');
@@ -291,6 +302,7 @@ $('add-form').addEventListener('submit', async event => {
     if (looksLikeLink(title)) throw new Error('Не удалось заполнить название по ссылке. Введите его вручную в верхней строке.');
     const { film } = await request('/api/films', { method: 'POST', body: JSON.stringify({ title, note: $('add-note').value, kinopoiskUrl: $('add-url').value, releaseYear: $('add-year').value ? Number($('add-year').value) : null, kinopoiskAvailabilityOverride: $('add-availability').value === 'auto' ? null : $('add-availability').value }) });
     films.push(film); $('add-form').reset(); resetLookup(); autoTitle = autoYear = null; $('season-fields').hidden = true; $('add-details').open = false;
+    if (kindFilter !== 'all' && filmKind(film) !== kindFilter) { kindFilter = 'all'; rememberKind(); }
     filter = 'all'; $('search').value = ''; updateTabs(); render(); toast('Добавлено в планы'); $('add-title').focus();
   } catch (e) { errorIn('add-error', e); }
   finally { adding = false; button.disabled = false; }
@@ -330,6 +342,8 @@ $('delete-film').addEventListener('click', async event => {
 });
 function updateTabs() { document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.filter === filter))); }
 document.querySelector('.tabs').addEventListener('click', event => { const button = event.target.closest('[data-filter]'); if (button) { filter = button.dataset.filter; updateTabs(); render(); } });
+document.querySelector('.type-filters').addEventListener('click', event => { const button = event.target.closest('[data-kind]'); if (button) { kindFilter = button.dataset.kind; rememberKind(); render(); } });
+$('reset-filters').addEventListener('click', () => { kindFilter = filter = 'all'; $('search').value = ''; rememberKind(); updateTabs(); render(); });
 $('search').addEventListener('input', render);
 $('sort').addEventListener('change', () => { sorting = $('sort').value; try { localStorage.setItem('films-sort', sorting); } catch {} render(); });
 for (const id of ['close-edit', 'cancel-edit']) $(id).addEventListener('click', () => $('edit-dialog').close());

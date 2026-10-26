@@ -1,3 +1,19 @@
+export function filmKind(film) {
+  try {
+    const url = new URL(film.kinopoiskUrl);
+    if (url.protocol !== 'https:' || !['kinopoisk.ru', 'www.kinopoisk.ru'].includes(url.hostname) || url.username || url.password || url.port) return null;
+    return url.pathname.match(/^\/(film|series)\/\d+\/?$/)?.[1] || null;
+  } catch { return null; }
+}
+
+export function filterFilms(films, { kind = 'all', status = 'all', query = '' } = {}) {
+  const normalize = text => text.toLocaleLowerCase('ru').replaceAll('ё', 'е');
+  const needle = normalize(query.trim());
+  return films.filter(film => (kind === 'all' || filmKind(film) === kind)
+    && (status === 'all' || film.watched === (status === 'watched'))
+    && normalize(`${film.title} ${film.releaseYear || ''} ${film.note || ''}`).includes(needle));
+}
+
 export function sortFilms(films, sort = 'note') {
   return [...films].sort((a, b) => {
     if (a.watched !== b.watched) return Number(a.watched) - Number(b.watched);

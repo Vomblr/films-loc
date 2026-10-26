@@ -30,7 +30,7 @@ The interface is intentionally small: one page, readable text, generous touch ta
 | Watch on Kinopoisk | Checks the public streaming catalogue when a link is added. A play button means confirmed availability; unavailable and unknown results stay distinct. |
 | Sensible years | Films use the earliest known premiere; series use the first broadcast year; selected seasons use their own release year. |
 | Watch history | Stores the viewing date separately from the timestamp when the watched mark was added. Unknown historical dates can stay empty. |
-| Search & sorting | Search Russian/original names, notes, and years. Sort by viewing date, title, or imported order. Planned items remain above watched items. |
+| Search & sorting | Combine All / Movies / Series with watch status and search. Counters reflect the current filters; the type choice is remembered in this browser. Sort by viewing date, title, or imported order. Planned items remain above watched items. |
 | Recoverable deletion | Move an entry to Trash and restore it later. |
 | Telegram shortcut | `torrent` opens `@torrents_2_bot` with one prepared query such as `Начало Inception 2010`. |
 | Durable storage | A local SQLite database, optimistic version checks, JSON export, and daily JSON snapshots. |
@@ -101,6 +101,10 @@ See [the self-hosting guide](docs/self-hosting.md) for binding, DNS, a reverse p
 5. Use **⋯** to edit the viewing date, change details, or move the entry to Trash.
 
 The app refreshes its list while visible, so another device's changes appear without a manual reload. Concurrent edits use version checks: a stale write is rejected instead of silently overwriting a newer one.
+
+Use **Все типы / Фильмы / Сериалы** above the watch-status tabs to narrow the list. For unwatched series, select **Сериалы → В планах**. Type, status, and search combine, including in Trash. Type comes from the exact Kinopoisk card path (`/film/` or `/series/`); entries without a recognizable card remain visible under **Все типы**. If no entries match, **Сбросить фильтры** clears type, status, and search together. Adding an entry that does not match the selected type returns to **Все типы**, so the new entry stays visible.
+
+<p align="center"><img src="docs/images/type-filter.jpg" alt="Mobile type filter showing only series, with matching watch-status counters" width="340"></p>
 
 ## How metadata works
 
