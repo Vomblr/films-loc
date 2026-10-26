@@ -117,8 +117,12 @@ function resetLookup({ clearAuto = false } = {}) {
   if (clearAuto) {
     if ($('add-title').value === autoTitle) $('add-title').value = '';
     if ($('add-year').value === autoYear) $('add-year').value = '';
-    if ($('add-note').value === autoNote) $('add-note').value = '';
-    autoTitle = autoYear = autoNote = null;
+    // Season/year changes keep the same series description; a different card clears it.
+    if (cardKey($('add-url').value) !== ratingsKey) {
+      if ($('add-note').value === autoNote) $('add-note').value = '';
+      autoNote = null;
+    }
+    autoTitle = autoYear = null;
   }
   $('fill-metadata').disabled = false; document.querySelector('.add-button').disabled = adding;
   metadataStatus('');
