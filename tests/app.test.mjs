@@ -46,7 +46,7 @@ test('API preserves import flags, persists updates across restart, and blocks cr
   let child;
   async function start() {
     child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(root, 'server.mjs')], {
-      env: { ...process.env, FILMS_DATA_DIR: testData, PORT: '18081', HOST: '127.0.0.1', FILMS_AVAILABILITY_NETWORK: '0' }, stdio: ['ignore', 'pipe', 'pipe']
+      env: { ...process.env, FILMS_DATA_DIR: testData, PORT: '18081', HOST: '127.0.0.1', FILMS_AVAILABILITY_NETWORK: '0', FILMS_RATINGS_NETWORK: '0' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
     child.stdout.on('data', data => { log += data; }); child.stderr.on('data', data => { log += data; });
@@ -66,20 +66,25 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     assert.ok(imported.every(f => f.watchedAt === null && f.markedAt === null));
     assert.ok(imported.every(f => f.releaseYear === null && f.deletedAt === null));
     assert.ok(imported.every(f => f.kinopoiskAvailability.status === 'unknown' && f.kinopoiskAvailabilityOverride === null));
+    assert.ok(imported.every(f => f.kinopoiskStats.rating === null && f.kinopoiskStats.positiveReviews === null));
     assert.equal(imported.find(f => f.id === seed.films.find(f => !f.watched).id).watched, false);
     assert.equal(imported.find(f => f.id === seed.films.find(f => f.watched).id).watched, true);
     assert.equal((await send('/api/kinopoisk/lookup', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);
     assert.equal((await send('/api/kinopoisk/lookup', 'POST', { url: 'https://127.0.0.1/admin' })).status, 400);
     assert.equal((await send('/api/kinopoisk/availability', 'POST', { url: 'https://127.0.0.1/admin' })).status, 400);
+    assert.equal((await send('/api/kinopoisk/ratings', 'POST', { url: 'https://127.0.0.1/admin' })).status, 400);
+    assert.equal((await send('/api/kinopoisk/ratings', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);
     assert.equal((await send('/api/kinopoisk/availability', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);
     const metadataResponse = await send('/api/kinopoisk/lookup', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' });
     assert.equal(metadataResponse.status, 200);
     const lookup = (await metadataResponse.json()).metadata;
     assert.equal(lookup.title, 'Начало (Inception)'); assert.equal(lookup.releaseYear, 2010);
     assert.equal((await (await fetch(origin + '/api/films')).json()).films.length, seed.films.length);
-    const created = await send('/api/films', 'POST', { title: '<script>Проверка</script>', kinopoiskUrl: 'https://www.kinopoisk.ru/film/123/', note: 'API test', releaseYear: 1997, kinopoiskAvailabilityOverride: 'available' });
+    const created = await send('/api/films', 'POST', { title: '<script>Проверка</script>', kinopoiskUrl: 'https://www.kinopoisk.ru/film/123/', note: 'API test', releaseYear: 1997, kinopoiskAvailabilityOverride: 'available',
+      additionalLinks: [{ label: 'Другой сериал', url: 'https://www.kinopoisk.ru/series/789/' }] });
     assert.equal(created.status, 201); const f = (await created.json()).film;
     assert.equal(f.kinopoiskAvailability.status, 'available'); assert.equal(f.kinopoiskAvailability.source, 'manual'); assert.ok(f.kinopoiskAvailabilityMarkedAt);
+    assert.equal(f.kinopoiskAdditionalStats[0].label, 'Другой сериал'); assert.equal(f.kinopoiskAdditionalStats[0].stats.rating, null);
     const changed = await send('/api/films/' + f.id, 'PATCH', { version: f.version, watched: true, watchedAt: '2026-01-02' });
     assert.equal(changed.status, 200); const seen = (await changed.json()).film;
     assert.equal(seen.watchedAt, '2026-01-02'); assert.ok(seen.markedAt);
@@ -91,10 +96,16 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     assert.equal((await send('/api/films', 'POST', { title: 'Bad URL', kinopoiskUrl: 'javascript:alert(1)' })).status, 400);
     assert.equal((await fetch(origin + '/data/films.sqlite')).status, 404);
     const exported = await (await fetch(origin + '/api/export')).json(); assert.equal(exported.films.length, seed.films.length + 1);
-    await stop(); await start();
+    await stop();
+    const cachedDb = new DatabaseSync(path.join(testData, 'films.sqlite'));
+    const stamp = new Date().toISOString();
+    cachedDb.prepare('INSERT INTO kinopoisk_ratings VALUES (?,?)').run('123', JSON.stringify({ id: '123', rating: 7.5, positiveReviews: 2, negativeReviews: 1,
+      neutralReviews: 2, totalReviews: 5, ratingCheckedAt: stamp, reviewsCheckedAt: stamp, checkedAt: stamp, attemptedAt: stamp, status: 'ok' }));
+    cachedDb.close(); await start();
     const saved = (await (await fetch(origin + '/api/films')).json()).films.find(item => item.id === f.id);
     assert.equal(saved.title, '<script>Проверка</script>'); assert.equal(saved.watchedAt, '2026-01-02'); assert.equal(saved.markedAt, seen.markedAt);
     assert.equal(saved.releaseYear, 1997);
+    assert.equal(saved.kinopoiskStats.rating, 7.5); assert.equal(saved.kinopoiskStats.positiveReviews, 2);
     assert.equal(saved.kinopoiskAvailability.status, 'available'); assert.equal(saved.kinopoiskAvailabilityMarkedAt, f.kinopoiskAvailabilityMarkedAt);
     const deletedResponse = await send('/api/films/' + f.id, 'PATCH', { version: saved.version, deleted: true });
     const deleted = (await deletedResponse.json()).film; assert.ok(deleted.deletedAt);
@@ -113,5 +124,6 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     const relinkedResponse = await send('/api/films/' + f.id, 'PATCH', { version: unmarked.version, kinopoiskUrl: 'https://www.kinopoisk.ru/film/456/' });
     const relinked = (await relinkedResponse.json()).film;
     assert.equal(relinked.kinopoiskAvailability.status, 'unknown'); assert.equal(relinked.kinopoiskAvailabilityOverride, null); assert.equal(relinked.kinopoiskAvailabilityMarkedAt, null);
+    assert.equal(relinked.kinopoiskStats.rating, null); assert.equal(relinked.kinopoiskStats.positiveReviews, null);
   } finally { await stop(); }
 });

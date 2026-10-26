@@ -24,11 +24,13 @@ The browser uses the same origin for assets and JSON endpoints. It keeps the cur
 | `lib.mjs` | Record validation, row conversion, private-address checks. |
 | `metadata.mjs` | Kinopoisk URL parsing, exact Wikidata ID matching, title/date selection, cache, timeouts, concurrency limit. |
 | `availability.mjs` | Exact-title Kinopoisk streaming-status parsing, persistent-cache interface, expiry, and in-flight deduplication. |
+| `ratings.mjs`, `ratings-parser.mjs` | Exact-title Kinopoisk rating and viewer-review parsing, independent field refresh, persistent cache, and expiry. |
 | `kinopoisk-http.mjs` | Bounded public-page navigation and anonymous SSO, strict destination checks, temporary scoped cookies. |
 | `public/app.js` | Rendering, add/edit/watch/trash actions, metadata form state, clipboard fallback. |
 | `public/sort.mjs` | Planned/watched grouping and sort rules. |
 | `public/torrent.mjs` | Plain-text queries and fixed Telegram destination. |
 | `public/availability.mjs` | Streaming indicator labels, stale/unknown states, and safe official watch links. |
+| `public/ratings.mjs` | Localized score/count formatting, score color tiers, missing values, and safe official card/review links. |
 | `public/index.html`, `styles.css` | Page structure, dialogs, responsive visual design. |
 | `seed.json` | Deliberately authored demo records for a fresh database. |
 | `metadata-catalog.json` | Small reviewed public metadata examples; exact film/season keys. |
@@ -48,6 +50,7 @@ Russian and original titles currently share one display string: `Русское 
 - `version` increments on every mutation. Updates must provide the current version.
 - `kinopoiskAvailabilityOverride` is `null`, `available`, or `unavailable`; its manual confirmation time is stored separately.
 - `kinopoiskAvailability` is an enriched read field with `status`, `checkedAt`, `source`, `reason`, `watchUrl`, and `stale`. Automatic results live in a separate ID-keyed SQLite table. Refreshing them does not edit notes, watch history, record versions, or `updatedAt`.
+- `kinopoiskStats` adds the primary card's rating, rating-vote count, positive/negative/neutral/total viewer-review counts, per-source check times, attempt time, and refresh status. `kinopoiskAdditionalStats` covers extra card links. These are enriched read fields backed by `kinopoisk_ratings`, not edits to the film record. Exports use schema version 4.
 
 ## HTTP API
 
@@ -62,6 +65,7 @@ All bodies and responses use JSON. Write requests must have `Content-Type: appli
 | `PATCH` | `/api/films/<id>` | Versioned edit/watch/delete/restore. |
 | `POST` | `/api/kinopoisk/lookup` | Fetch form metadata; does not save a record. |
 | `POST` | `/api/kinopoisk/availability` | Check `{ "url": "https://www.kinopoisk.ru/film/461939/", "refresh": false }`; returns `{ "availability": ... }`. Set `refresh: true` to bypass the result cache. |
+| `POST` | `/api/kinopoisk/ratings` | The same URL/refresh request shape; returns `{ "stats": ... }` for the exact linked title. Saving a new or changed card also checks its rating and viewer reviews. |
 
 Example lookup:
 
@@ -106,6 +110,12 @@ Film release dates are selected from non-deprecated `P577` statements; a regiona
 An exact public Kinopoisk ID match is required. Ambiguous matches fail with a manual-entry message. Network lookups have a time limit, bounded responses, at most three concurrent requests, in-flight deduplication, and a capped one-day memory cache. Reviewed local entries take precedence and carry their verification date.
 
 ## Boundaries
+
+Scores come from the matching `Film`/`TvSeries` entity in the public card's normalized Apollo state. The parser verifies the page ID, root query reference, entity ID, and type. SSR assignments are scanned as balanced JSON, with string escaping handled; source scripts are never executed. Only the Kinopoisk rating is read, not IMDb or critic ratings.
+
+Viewer sentiments come from a same-ID `/film/ID/reviews/` page, including for series. Its own back-link, the unique sentiment block, per-sentiment links, integer counters, and internal total must agree. Legacy positive/negative counts are not combined with modern nonzero review totals. An explicit exact-ID modern total of zero can establish zero sentiments when the legacy counters are absent.
+
+Rating and review requests share an 8.5-second operation deadline; the HTTP helper further bounds each navigation to eight seconds/eight hops/three MiB. Two logical rating lookups can run concurrently. Successful field values survive unrelated source failures, with their original field timestamps retained. Complete results expire after a day; partial/failed attempts after 15 minutes. Existing active and trashed titles and their additional links are covered by throttled sweeps.
 
 Availability requires a matching numeric title ID and matching HD UUID in the public page's `__NEXT_DATA__`. Only the current-region/current-device `isWatchable` field and the corresponding `WATCHABLE`/`UNWATCHABLE` enum are accepted; missing, contradictory, future-announced, or unfamiliar values remain unknown. Requests have an eight-second deadline, a redirect limit, a three-MiB response bound, and two concurrent lookups. Confirmed results expire after 24 hours; unknowns after 15 minutes. Background work is throttled and pauses the current pass on challenges or network errors. Manual overrides take precedence.
 

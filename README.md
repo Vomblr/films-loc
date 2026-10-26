@@ -28,6 +28,7 @@ The interface is intentionally small: one page, readable text, generous touch ta
 | Fast entry | Add a title immediately, or expand the year, Kinopoisk link, and note fields. |
 | Metadata lookup | A Kinopoisk card ID resolves to Russian and original titles and a release year through a small reviewed cache or Wikidata. No API key. |
 | Watch on Kinopoisk | Checks the public streaming catalogue when a link is added. A play button means confirmed availability; unavailable and unknown results stay distinct. |
+| Rating & viewer reviews | Automatically loads the Kinopoisk score and positive/negative viewer-review counts. Small colored badges keep them readable without a poster grid. |
 | Sensible years | Films use the earliest known premiere; series use the first broadcast year; selected seasons use their own release year. |
 | Watch history | Stores the viewing date separately from the timestamp when the watched mark was added. Unknown historical dates can stay empty. |
 | Search & sorting | Combine All / Movies / Series with watch status and search. Counters reflect the current filters; the type choice is remembered in this browser. Sort by viewing date, title, or imported order. Planned items remain above watched items. |
@@ -134,11 +135,28 @@ Paste a Kinopoisk link as usual. Alongside the title and premiere year, the app 
 
 <p align="center"><img src="docs/images/availability.jpg" alt="A confirmed Kinopoisk streaming offer for The Lincoln Lawyer, with its play button" width="340"></p>
 
-Checks also cover existing linked entries in a throttled background pass. Confirmed results are cached in SQLite for 24 hours; unknown results for 15 minutes. A sweep runs at startup and every 15 minutes while the server is running. In **⋯ → Просмотр на Кинопоиске**, inspect the check time, use **Проверить сейчас**, or choose a manual confirmation. Manual choices are preserved across automatic refreshes and reset when the card URL changes.
+Checks also cover existing linked entries in a throttled background pass. Confirmed results are cached in SQLite for 24 hours; unknown results for 15 minutes. A sweep runs at startup and every 15 minutes while the server is running. In **⋯ → Просмотр на Кинопоиске**, inspect the check time, use **Обновить данные Кинопоиска**, or choose a manual confirmation. Manual choices are preserved across automatic refreshes and reset when the card URL changes.
 
 The detector matches the original numeric Kinopoisk ID and the HD card ID before reading the current-region/current-device `viewOption`. A trailer, a recommendation, or a redirect to an HD page does not count as an offer. Public anonymous SSO navigation uses temporary cookies in memory; account login, browser cookies, API keys, and script execution are not used. CAPTCHA and unexpected authentication stop the check.
 
 Availability can depend on region, account, device, subscription, or purchase. A series-level offer does not confirm every season. The play button indicates catalogue availability, not that your account has paid access. The check uses public page data rather than a supported availability API; source changes safely become unknown results.
+
+## Kinopoisk rating and viewer reviews
+
+Each linked title has a compact reception row:
+
+- **КП 8,1** — the Kinopoisk audience score, rounded to one decimal. Green, amber, and muted coral distinguish higher, middle, and lower scores; the numeric value is always shown.
+- **рецензии +117 −7** — positive and negative **viewer-written reviews**. These are separate from rating votes and professional critics' reviews.
+
+<p align="center"><img src="docs/images/ratings.jpg" alt="Mobile film card with a Kinopoisk score and green/red viewer-review counters" width="340"></p>
+
+Pasting a link fills these indicators alongside the title and premiere year. Existing linked entries, including Trash and additional card links, are checked in the background. Separate works in one imported entry have their own labelled indicators. A season entry uses the series card's score and reviews; premiere-year rules remain unchanged.
+
+Tap a score to open its official card, or the review counters to open that title's viewer reviews. Tooltips show exact counts, neutral-review totals, and independent update times. The editor's **Обновить данные Кинопоиска** refreshes the main card's score, reviews, and streaming availability.
+
+The score comes from the exact title's current public card; sentiment counts come from its official `/film/ID/reviews/` page, including for series. Modern main-card review totals and the older reviews page can differ, so counts from those two systems are not combined. An explicitly empty exact-ID viewer-review total can establish zero counts. Missing data stays `—`; an unpublished score remains `—` even when rating votes exist.
+
+Results are stored separately in SQLite for 24 hours, with partial/failed checks retried after 15 minutes. Failed refreshes preserve previously received numbers and their original timestamps. Source challenges and rate limits pause the current background pass. No API key, account login, signed-in browser session, review text, or review author data is used or stored.
 
 ## Telegram shortcut
 
@@ -177,6 +195,8 @@ The tests cover ordering, calendar and URL validation, schema upgrades, persiste
 
 Availability tests use synthetic public-page fixtures and mocked HTTP responses. They cover title identity, region/device fields, anonymous SSO cookie scope, blocked responses, cache expiry, and manual overrides; they do not call Kinopoisk during CI.
 
+Rating/review tests cover exact card identity, viewer-versus-critic separation, explicit zeroes and missing scores, inconsistent counters, independent refresh failures, cache persistence, and display formatting. They also use synthetic fixtures and make no external requests.
+
 GitHub Actions runs the suite on Windows and Ubuntu with Node.js 24. No browser framework or package installation is required for the test suite.
 
 See [architecture and API](docs/architecture.md) for the source map, data model, endpoints, and extension points.
@@ -195,5 +215,5 @@ No software license has been selected for this repository. The example Wikidata 
 
 - [Node.js](https://nodejs.org/docs/latest-v24.x/api/sqlite.html) for the runtime and built-in SQLite module.
 - [Wikidata](https://www.wikidata.org/wiki/Help:Data_access) for public identifiers, original titles, and release dates.
-- [Kinopoisk](https://www.kinopoisk.ru/) for film and series card identifiers and outbound links.
+- [Kinopoisk](https://www.kinopoisk.ru/) for film identifiers, public rating/review and streaming information, and outbound links.
 - [Telegram](https://core.telegram.org/api/links#public-username-links) for documented chat links and prepared draft text.

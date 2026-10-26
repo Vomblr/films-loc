@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { validateFilm, toFilm, isPrivateAddress } from './lib.mjs';
 import { createMetadataLookup } from './metadata.mjs';
 import { createAvailabilityLookup } from './availability.mjs';
+import { createRatingsLookup } from './ratings.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const lookupMetadata = createMetadataLookup({ catalog: JSON.parse(readFileSync(path.join(root, 'metadata-catalog.json'), 'utf8')) });
@@ -20,7 +21,8 @@ db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=F
     source_order INTEGER NOT NULL, source_text TEXT, version INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS kinopoisk_availability (id TEXT PRIMARY KEY, result TEXT NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS kinopoisk_availability (id TEXT PRIMARY KEY, result TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS kinopoisk_ratings (id TEXT PRIMARY KEY, result TEXT NOT NULL);`);
 
 const columns = new Set(db.prepare('PRAGMA table_info(films)').all().map(column => column.name));
 for (const [name, type] of [['release_year', 'INTEGER'], ['deleted_at', 'TEXT'], ['additional_links', "TEXT NOT NULL DEFAULT '[]'"],
@@ -43,18 +45,27 @@ if (!db.prepare("SELECT value FROM metadata WHERE key='seeded'").get()) {
 const availabilityCache = db.prepare('SELECT result FROM kinopoisk_availability').all().flatMap(row => { try { return [JSON.parse(row.result)]; } catch { return []; } });
 const availability = createAvailabilityLookup({ records: availabilityCache, enabled: process.env.FILMS_AVAILABILITY_NETWORK !== '0',
   onResult: entry => db.prepare('INSERT INTO kinopoisk_availability (id,result) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result').run(entry.id, JSON.stringify(entry)) });
+const ratingsCache = db.prepare('SELECT result FROM kinopoisk_ratings').all().flatMap(row => { try { return [JSON.parse(row.result)]; } catch { return []; } });
+const ratings = createRatingsLookup({ records: ratingsCache, enabled: process.env.FILMS_RATINGS_NETWORK !== '0',
+  onResult: entry => db.prepare('INSERT INTO kinopoisk_ratings (id,result) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result').run(entry.id, JSON.stringify(entry)) });
 function filmWithAvailability(row) {
   const film = toFilm(row);
   film.kinopoiskAvailability = film.kinopoiskAvailabilityOverride ? { status: film.kinopoiskAvailabilityOverride,
     checkedAt: film.kinopoiskAvailabilityMarkedAt, source: 'manual', reason: 'user-confirmed', watchUrl: null, stale: false }
     : availability.peek(film.kinopoiskUrl);
+  film.kinopoiskStats = ratings.peek(film.kinopoiskUrl);
+  film.kinopoiskAdditionalStats = film.additionalLinks.map(link => ({ ...link, stats: ratings.peek(link.url) }));
   return film;
 }
 const allFilms = (trash = false) => db.prepare(`SELECT * FROM films WHERE deleted_at IS ${trash ? 'NOT ' : ''}NULL ORDER BY source_order`).all().map(filmWithAvailability);
-const snapshot = () => ({ schemaVersion: 3, exportedAt: new Date().toISOString(), films: allFilms(), trash: allFilms(true) });
+const snapshot = () => ({ schemaVersion: 4, exportedAt: new Date().toISOString(), films: allFilms(), trash: allFilms(true) });
 async function checkFilmAvailability(film) {
   if (film.kinopoiskUrl && !film.kinopoiskAvailabilityOverride && availability.peek(film.kinopoiskUrl).reason !== 'no-card')
     await availability.lookup({ url: film.kinopoiskUrl });
+}
+async function checkFilmRatings(film) {
+  const urls = [film.kinopoiskUrl, ...film.additionalLinks.map(link => link.url)].filter(Boolean);
+  await Promise.all(urls.filter(url => ratings.peek(url).reason !== 'no-card').map(url => ratings.lookup({ url })));
 }
 let availabilityRefreshing = false, stopping = false;
 async function refreshAvailability() {
@@ -72,6 +83,22 @@ async function refreshAvailability() {
   } catch (error) { console.error('Availability refresh:', error.code || 'lookup failed'); }
   finally { availabilityRefreshing = false; }
 }
+let ratingsRefreshing = false;
+async function refreshRatings() {
+  if (ratingsRefreshing || !ratings.enabled || stopping) return;
+  ratingsRefreshing = true;
+  try {
+    const urls = new Set([...allFilms(), ...allFilms(true)].flatMap(f => [f.kinopoiskUrl, ...f.additionalLinks.map(link => link.url)]).filter(Boolean));
+    for (const url of urls) {
+      if (stopping) break;
+      if (ratings.isFresh(url)) continue;
+      const result = await ratings.lookup({ url });
+      if (['blocked', 'network-error'].includes(result.reason)) break;
+      await new Promise(resolve => { const timer = setTimeout(resolve, 750); timer.unref(); });
+    }
+  } catch (error) { console.error('Rating refresh:', error.code || 'lookup failed'); }
+  finally { ratingsRefreshing = false; }
+}
 function dailyBackup() {
   const filename = path.join(dataDir, 'backups', `${new Date().toISOString().slice(0, 10)}.json`);
   if (!existsSync(filename)) writeFileSync(filename, JSON.stringify(snapshot(), null, 2), { encoding: 'utf8', flag: 'wx' });
@@ -84,6 +111,7 @@ const assets = new Map([
   ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']], ['/sort.mjs', ['sort.mjs', 'text/javascript; charset=utf-8']],
   ['/torrent.mjs', ['torrent.mjs', 'text/javascript; charset=utf-8']],
   ['/availability.mjs', ['availability.mjs', 'text/javascript; charset=utf-8']],
+  ['/ratings.mjs', ['ratings.mjs', 'text/javascript; charset=utf-8']],
   ['/apple-touch-icon.png', ['apple-touch-icon.png', 'image/png']]
 ]);
 const securityHeaders = {
@@ -122,6 +150,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/kinopoisk/availability')
       return json(res, 200, { availability: await availability.lookup(await readBody(req)) });
+    if (req.method === 'POST' && url.pathname === '/api/kinopoisk/ratings')
+      return json(res, 200, { stats: await ratings.lookup(await readBody(req)) });
     if (req.method === 'GET' && url.pathname === '/api/export') {
       res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="films-${new Date().toISOString().slice(0, 10)}.json"` });
       return res.end(JSON.stringify(snapshot(), null, 2));
@@ -129,7 +159,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/films') {
       const body = await readBody(req);
       const f = validateFilm(body);
-      await checkFilmAvailability(f);
+      await Promise.all([checkFilmAvailability(f), checkFilmRatings(f)]);
       const now = new Date().toISOString(), id = randomUUID();
       dailyBackup();
       const order = db.prepare('SELECT COALESCE(MAX(source_order),0)+1 AS n FROM films').get().n;
@@ -147,7 +177,10 @@ const server = http.createServer(async (req, res) => {
       if (body.deleted !== undefined && typeof body.deleted !== 'boolean') return json(res, 400, { error: 'Некорректный статус удаления.' });
       if (old.deletedAt && body.deleted !== false) return json(res, 409, { error: 'Фильм в корзине. Сначала восстановите его.' });
       const f = validateFilm(body, old);
-      if (f.kinopoiskUrl !== old.kinopoiskUrl || (old.kinopoiskAvailabilityOverride && !f.kinopoiskAvailabilityOverride)) await checkFilmAvailability(f);
+      await Promise.all([
+        f.kinopoiskUrl !== old.kinopoiskUrl || (old.kinopoiskAvailabilityOverride && !f.kinopoiskAvailabilityOverride) ? checkFilmAvailability(f) : undefined,
+        f.kinopoiskUrl !== old.kinopoiskUrl ? checkFilmRatings(f) : undefined
+      ]);
       const now = new Date().toISOString();
       const availabilityMarkedAt = f.kinopoiskAvailabilityOverride ? (f.kinopoiskAvailabilityOverride === old.kinopoiskAvailabilityOverride && f.kinopoiskUrl === old.kinopoiskUrl ? old.kinopoiskAvailabilityMarkedAt : now) : null;
       const markedAt = f.watched ? (old.watched ? old.markedAt : now) : null;
@@ -176,6 +209,7 @@ server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 const port = Number(process.env.PORT || 8766), bind = process.env.HOST || '127.0.0.1';
 server.on('error', error => { console.error(error.message); process.exitCode = 1; });
-server.listen(port, bind, () => { console.log(`Films ready: http://127.0.0.1:${port} | data: ${dataDir}`); refreshAvailability(); });
+server.listen(port, bind, () => { console.log(`Films ready: http://127.0.0.1:${port} | data: ${dataDir}`); refreshAvailability(); refreshRatings(); });
 const availabilityTimer = setInterval(refreshAvailability, 15 * 60000); availabilityTimer.unref();
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; clearInterval(availabilityTimer); server.close(() => { db.close(); process.exit(0); }); });
+const ratingsTimer = setInterval(refreshRatings, 15 * 60000); ratingsTimer.unref();
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; clearInterval(availabilityTimer); clearInterval(ratingsTimer); server.close(() => { db.close(); process.exit(0); }); });

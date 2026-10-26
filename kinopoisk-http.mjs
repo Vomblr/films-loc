@@ -25,7 +25,7 @@ function officialUrl(value) {
 function publicUrl(value) {
   const url = officialUrl(value);
   const valid = url.hostname === 'www.kinopoisk.ru'
-    ? /^\/(?:film|series)\/\d+\/(?:watch\/)?$/.test(url.pathname)
+    ? /^\/(?:film|series)\/\d+\/(?:(?:watch|reviews)\/)?$/.test(url.pathname)
     : url.hostname === 'hd.kinopoisk.ru' && /^\/film\/[a-f\d]{32}\/?$/.test(url.pathname);
   if (!valid || [...url.searchParams.keys()].some(key => key !== 'utm_referrer')) fail('invalid_target');
   // This is the ordinary URL returned by Kinopoisk's anonymous SSO navigation.
@@ -134,6 +134,10 @@ export async function fetchKinopoiskPage(target, { fetchImpl = fetch, signal } =
       const location = result.response.headers.get('location');
       if (!location) fail('missing_redirect');
       const next = officialUrl(new URL(location, page).href);
+      const fromCard = page.pathname.match(/^\/(?:film|series)\/(\d+)\/(reviews\/)?$/);
+      const toCard = next.pathname.match(/^\/(?:film|series)\/(\d+)\/(reviews\/)?$/);
+      if (page.hostname === 'www.kinopoisk.ru' && next.hostname === 'www.kinopoisk.ru' && fromCard && toCard &&
+          fromCard[1] === toCard[1] && fromCard[2] === toCard[2]) { page = publicUrl(next.href); continue; }
       if (next.hostname === 'hd.kinopoisk.ru' && page.hostname === 'www.kinopoisk.ru' && /\/watch\/$/.test(page.pathname)) {
         page = publicUrl(next.href);
         continue;

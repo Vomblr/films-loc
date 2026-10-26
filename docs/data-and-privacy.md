@@ -14,10 +14,11 @@ The checked-in `seed.json` is a demonstration authored for this repository. Its 
 | --- | --- | --- |
 | Uncached metadata lookup | `www.wikidata.org` | Public Kinopoisk ID, public entity IDs, and requested season relationships. |
 | Streaming availability check | Official Kinopoisk/HD pages and Yandex anonymous SSO hosts | Public card ID/URL and a fresh temporary anonymous session. The check also runs for existing linked titles. |
+| Rating / viewer-review check | Official Kinopoisk card and reviews pages, plus anonymous SSO hosts | Public title IDs/URLs. Only aggregate scores/counts are retained; review text and author profiles are not collected. |
 | Open Kinopoisk | `www.kinopoisk.ru` | The chosen public card URL. |
 | Click torrent | `t.me/torrents_2_bot` | Russian/original title and the stored release year in the `text` query parameter. |
 
-Metadata and availability clients do not send notes, viewing dates, or watch status. The availability client does not read browser profiles or signed-in cookies; its anonymous HTTP cookies exist only in memory for one lookup and are never logged or stored in SQLite. Set `FILMS_AVAILABILITY_NETWORK=0` to turn those network checks off. Third-party websites and clients have their own privacy policies. The app does not send analytics, use advertising scripts, or load external poster images. API keys and signed-in browser cookies are not required.
+Metadata, rating/review, and availability clients do not send notes, viewing dates, or watch status. The public-page client does not read browser profiles or signed-in cookies; its anonymous HTTP cookies exist only in memory for one lookup and are never logged or stored in SQLite. Set `FILMS_AVAILABILITY_NETWORK=0` and/or `FILMS_RATINGS_NETWORK=0` to disable the corresponding network checks. Third-party websites and clients have their own privacy policies. The app does not send analytics, use advertising scripts, or load external poster images. API keys and signed-in browser cookies are not required.
 
 ## Backups
 
