@@ -67,6 +67,12 @@ test('API preserves import flags, persists updates across restart, and blocks cr
     assert.ok(imported.every(f => f.releaseYear === null && f.deletedAt === null));
     assert.ok(imported.every(f => f.kinopoiskAvailability.status === 'unknown' && f.kinopoiskAvailabilityOverride === null));
     assert.ok(imported.every(f => f.kinopoiskStats.rating === null && f.kinopoiskStats.positiveReviews === null));
+    assert.equal((await (await fetch(origin + '/api/kinopoisk/refresh-planned')).json()).refresh.status, 'idle');
+    assert.equal((await send('/api/kinopoisk/refresh-planned', 'POST', {}, { Origin: 'http://example.org' })).status, 403);
+    const refreshResponse = await send('/api/kinopoisk/refresh-planned', 'POST', {});
+    assert.equal(refreshResponse.status, 202); assert.equal((await refreshResponse.json()).refresh.reason, 'disabled');
+    assert.deepEqual((await (await fetch(origin + '/api/films')).json()).films, imported);
+    assert.equal((await send('/api/kinopoisk/refresh-planned/stop', 'POST', {})).status, 200);
     assert.equal(imported.find(f => f.id === seed.films.find(f => !f.watched).id).watched, false);
     assert.equal(imported.find(f => f.id === seed.films.find(f => f.watched).id).watched, true);
     assert.equal((await send('/api/kinopoisk/lookup', 'POST', { url: 'https://www.kinopoisk.ru/film/447301/' }, { Origin: 'http://example.org' })).status, 403);

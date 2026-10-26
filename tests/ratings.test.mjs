@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseKinopoiskRating, parseKinopoiskViewerReviews } from '../ratings-parser.mjs';
+import { parseKinopoiskRating, parseKinopoiskViewerReviews, parseKinopoiskDescription } from '../ratings-parser.mjs';
 import { createRatingsLookup } from '../ratings.mjs';
 import { ratingPresentation, ratingLinks } from '../public/ratings.mjs';
 
-function card({ id = 461939, type = 'Film', value = 8.094, active = true, total = 147 } = {}) {
+function card({ id = 461939, type = 'Film', value = 8.094, active = true, total = 147, description = 'Краткий сюжет', synopsis = 'Полный сюжет' } = {}) {
   const field = type === 'Film' ? 'film' : 'tvSeries';
   const state = { ROOT_QUERY: { [`${field}({"id":${id}})`]: { __ref: `${type}:${id}` } },
-    [`${type}:${id}`]: { __typename: type, id, title: { original: 'A {quoted} "title"' }, rating: {
+    [`${type}:${id}`]: { __typename: type, id, title: { original: 'A {quoted} "title"' }, shortDescription: description, synopsis, rating: {
       kinopoisk: { value, isActive: active, count: 822699 }, imdb: { value: 3.2, count: 12 }, worldwideCritics: { positiveCount: 143, negativeCount: 29 }
     }, 'userReviews({"limit":0})': { total } } };
-  return `<script>window.Ya.__ssr_initial_data = ${JSON.stringify({ apolloState: state })};window.unexecuted=true;</script>`
+  return `<script>window.Ya.__ssr_initial_data = ${JSON.stringify({ apolloState: state }).replaceAll('<', '\\u003c')};window.unexecuted=true;</script>`
     + `<script id="__NEXT_DATA__">${JSON.stringify({ props: { apolloState: { data: {} }, pageProps: { [field + 'Id']: id } } })}</script>`;
 }
 function reviews({ id = 461939, positive = 117, negative = 7, neutral = 17, total = positive + negative + neutral } = {}) {
@@ -20,6 +20,18 @@ function reviews({ id = 461939, positive = 117, negative = 7, neutral = 17, tota
     + counter('neg', 'Отрицательные', negative, 'bad') + counter('neut', 'Нейтральные', neutral, 'neutral') + '</ul>';
 }
 const input = { url: 'https://www.kinopoisk.ru/film/461939/?socialAlias=example' };
+
+test('description uses the exact card independently of rating, prefers short text, and safely normalizes fallback text', () => {
+  assert.deepEqual(parseKinopoiskDescription(card(), 461939), { text: 'Краткий сюжет', sourceField: 'shortDescription' });
+  assert.equal(parseKinopoiskDescription(card({ value: null }), 461939).text, 'Краткий сюжет');
+  assert.equal(parseKinopoiskDescription(card({ id: 915196, type: 'TvSeries', active: false }), 915196).text, 'Краткий сюжет');
+  assert.equal(parseKinopoiskDescription(card({ id: 447301 }), 461939), null);
+  assert.equal(parseKinopoiskDescription(card().replace('Film:461939', 'Film:999'), 461939), null);
+  const fallback = parseKinopoiskDescription(card({ description: ' \u00a0 ', synopsis: '<p>Герой&nbsp;и &#x434;руг</p><br> &laquo;Тайна&raquo; <script>never()</script>' }), 461939);
+  assert.deepEqual(fallback, { text: 'Герой и друг «Тайна»', sourceField: 'synopsis' });
+  assert.equal(parseKinopoiskDescription(card({ description: null, synopsis: null }), 461939).text, '');
+  assert.equal(parseKinopoiskDescription(card({ description: 'Я'.repeat(4000) }), 461939).text.length, 3000);
+});
 
 test('rating parsing verifies the exact main-card identity and selects Kinopoisk rather than IMDb or critics', () => {
   const parsed = parseKinopoiskRating(card(), 461939);
@@ -51,6 +63,7 @@ test('lookup keeps modern totals separate from viewer sentiments and deduplicate
   const [a, b] = await Promise.all([lookup.lookup(input), lookup.lookup(input)]);
   assert.equal(calls, 2); assert.deepEqual(a, b); assert.equal(a.rating, 8.094);
   assert.equal(a.positiveReviews, 117); assert.equal(a.negativeReviews, 7); assert.equal(a.totalReviews, 141); assert.equal(a.status, 'ok');
+  assert.equal(a.description, 'Краткий сюжет'); assert.ok(a.descriptionCheckedAt);
   await lookup.lookup(input); assert.equal(calls, 2); assert.equal(saved.length, 1);
   const restarted = createRatingsLookup({ records: saved, now: () => clock, fetchImpl });
   assert.equal(restarted.peek(input.url).positiveReviews, 117);
@@ -71,6 +84,16 @@ test('failed review refresh preserves prior counters while a new rating can upda
   clock += 1000; failAll = true;
   const failed = await lookup.lookup({ ...input, refresh: true });
   assert.equal(failed.rating, 8.2); assert.equal(failed.negativeReviews, 7); assert.equal(failed.status, 'unknown'); assert.equal(failed.stale, true);
+  assert.equal(failed.description, 'Краткий сюжет'); assert.equal(failed.descriptionCheckedAt, partial.descriptionCheckedAt);
+});
+
+test('a fresh older cache without a description is upgraded once for the add form', async () => {
+  const stamp = new Date().toISOString(); let calls = 0;
+  const lookup = createRatingsLookup({ records: [{ id: '461939', status: 'ok', rating: 8.1, attemptedAt: stamp }], fetchImpl: async url => {
+    calls++; return new Response(url.pathname.endsWith('/reviews/') ? reviews() : card());
+  } });
+  assert.equal((await lookup.lookup(input)).description, 'Краткий сюжет');
+  await lookup.lookup(input); assert.equal(calls, 2);
 });
 
 test('explicit exact-card zero total proves zero reviews; missing data never becomes zero', async () => {

@@ -1,9 +1,10 @@
 import { parseKinopoiskInput } from './metadata.mjs';
 import { fetchKinopoiskPage } from './kinopoisk-http.mjs';
-import { parseKinopoiskRating, parseKinopoiskViewerReviews } from './ratings-parser.mjs';
+import { parseKinopoiskRating, parseKinopoiskViewerReviews, parseKinopoiskDescription } from './ratings-parser.mjs';
 
 export const emptyRatings = (reason = 'not-checked') => ({ rating: null, ratingVotes: null, positiveReviews: null, negativeReviews: null,
   neutralReviews: null, totalReviews: null, ratingCheckedAt: null, reviewsCheckedAt: null, checkedAt: null, attemptedAt: null,
+  description: null, descriptionCheckedAt: null, descriptionSource: null,
   status: 'unknown', reason, sourceUrl: null, reviewsUrl: null, stale: false });
 const lifetime = entry => entry.status === 'ok' ? 24 * 3600000 : 15 * 60000;
 
@@ -24,7 +25,8 @@ export function createRatingsLookup({ records = [], onResult = () => {}, now = D
   async function lookup(body) {
     const input = parseKinopoiskInput(body);
     if (body.refresh !== undefined && typeof body.refresh !== 'boolean') throw new Error('Некорректный запрос обновления оценки.');
-    if (!enabled || (!body.refresh && isFresh(input.url))) return peek(input.url);
+    // A pre-description cache entry needs one new card fetch when used by the add form.
+    if (!enabled || (!body.refresh && isFresh(input.url) && Object.hasOwn(cache.get(input.id) || {}, 'description'))) return peek(input.url);
     if (pending.has(input.id)) return pending.get(input.id);
     if (active >= 2) return emptyRatings('busy');
     active++;
@@ -41,6 +43,9 @@ export function createRatingsLookup({ records = [], onResult = () => {}, now = D
         return { data, reason: data ? null : 'unrecognized-page' };
       });
       const stamp = new Date(now()).toISOString(), old = cache.get(input.id) || emptyRatings();
+      const cardResponse = responses[0];
+      const description = cardResponse.status === 'fulfilled' && cardResponse.value.status === 200
+        ? parseKinopoiskDescription(cardResponse.value.html, id) : null;
       const rating = parsed[0].data;
       let reviews = parsed[1].data;
       // An explicitly empty exact-ID user-review list proves zero sentiments.
@@ -50,10 +55,11 @@ export function createRatingsLookup({ records = [], onResult = () => {}, now = D
         if (!['blocked', 'network-error'].includes(parsed[1].reason)) parsed[1].reason = null;
       }
       const successes = Number(Boolean(rating)) + Number(Boolean(reviews));
-      const entry = { ...old, id: input.id, sourceUrl: input.url, reviewsUrl, attemptedAt: stamp,
+      const entry = { ...emptyRatings(), ...old, id: input.id, sourceUrl: input.url, reviewsUrl, attemptedAt: stamp,
         checkedAt: successes ? stamp : old.checkedAt, status: successes === 2 ? 'ok' : successes ? 'partial' : 'unknown',
         reason: parsed.some(part => part.reason === 'blocked') ? 'blocked' : parsed.find(part => part.reason)?.reason || null };
       if (rating) Object.assign(entry, { rating: rating.value, ratingVotes: rating.votes, ratingCheckedAt: stamp });
+      if (description) Object.assign(entry, { description: description.text, descriptionSource: description.sourceField, descriptionCheckedAt: stamp });
       if (reviews) Object.assign(entry, { positiveReviews: reviews.positive, negativeReviews: reviews.negative,
         neutralReviews: reviews.neutral, totalReviews: reviews.total, reviewsCheckedAt: stamp });
       if (cache.size >= 1000 && !cache.has(input.id)) cache.delete(cache.keys().next().value);

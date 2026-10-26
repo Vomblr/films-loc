@@ -18,7 +18,7 @@ const dateLabel = value => new Intl.DateTimeFormat('ru', { day: 'numeric', month
 const stampLabel = value => new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 function errorIn(id, error) { $(id).textContent = error?.message || ''; $(id).hidden = !error; }
 let metadataTimer, metadataSequence = 0, metadataPending = null, metadataKey = '', adding = false;
-let autoTitle = null, autoYear = null;
+let autoTitle = null, autoYear = null, autoNote = null, noteRevision = 0;
 let availabilitySequence = 0, availabilityKey = '', availabilityPending = null, addAvailability = {};
 let ratingsSequence = 0, ratingsKey = '', ratingsPending = null;
 const cardKey = text => { try { const u = new URL(text); return u.hostname.replace(/^www\./, '') + ':' + (u.pathname.match(/^\/(?:film|series)\/(\d+)\/?$/)?.[1] || u.pathname); } catch { return text.trim(); } };
@@ -62,11 +62,18 @@ async function fillRatings(force = false) {
   if (!url) return;
   if (!force && key === ratingsKey) return ratingsPending?.promise;
   const sequence = ++ratingsSequence; ratingsKey = key;
+  const noteBefore = $('add-note').value, revisionBefore = noteRevision;
   renderRatings($('add-ratings'), {}, url);
   const promise = (async () => {
     try {
       const { stats } = await request('/api/kinopoisk/ratings', { method: 'POST', body: JSON.stringify({ url, refresh: force }) });
-      if (sequence === ratingsSequence && cardKey($('add-url').value) === key) renderRatings($('add-ratings'), stats, url);
+      if (sequence === ratingsSequence && cardKey($('add-url').value) === key) {
+        renderRatings($('add-ratings'), stats, url);
+        if (stats.description && noteRevision === revisionBefore && $('add-note').value === noteBefore &&
+            (!noteBefore.trim() || noteBefore === autoNote)) {
+          $('add-note').value = stats.description; autoNote = stats.description;
+        }
+      }
     } catch { if (sequence === ratingsSequence) renderRatings($('add-ratings'), {}, url); }
     finally { if (sequence === ratingsSequence) ratingsPending = null; }
   })();
@@ -110,7 +117,8 @@ function resetLookup({ clearAuto = false } = {}) {
   if (clearAuto) {
     if ($('add-title').value === autoTitle) $('add-title').value = '';
     if ($('add-year').value === autoYear) $('add-year').value = '';
-    autoTitle = autoYear = null;
+    if ($('add-note').value === autoNote) $('add-note').value = '';
+    autoTitle = autoYear = autoNote = null;
   }
   $('fill-metadata').disabled = false; document.querySelector('.add-button').disabled = adding;
   metadataStatus('');
@@ -130,7 +138,7 @@ async function fillMetadata(force = false) {
   const sequence = ++metadataSequence, titleBefore = $('add-title').value, yearBefore = $('add-year').value;
   const seasonValue = $('add-season').value;
   $('fill-metadata').disabled = true; document.querySelector('.add-button').disabled = true;
-  metadataStatus('Ищем названия и дату премьеры…');
+  metadataStatus('Ищем названия, дату премьеры и описание…');
   const availabilityRequest = fillAvailability(force);
   const ratingsRequest = fillRatings(force);
   const promise = (async () => {
@@ -171,6 +179,7 @@ function urlChanged() {
   if ($('add-url').value.trim()) metadataTimer = setTimeout(() => fillMetadata(), 450);
 }
 $('add-url').addEventListener('input', urlChanged);
+$('add-note').addEventListener('input', () => { noteRevision++; });
 $('add-title').addEventListener('input', () => {
   const text = $('add-title').value.trim();
   if (/^https:\/\/(www\.)?kinopoisk\.ru\/(film|series)\/\d+\/?(?:[?#].*)?$/i.test(text)) {
@@ -189,7 +198,8 @@ async function load() {
   if (refreshPending) return;
   refreshPending = true;
   try {
-    const [result, deleted] = await Promise.all([request('/api/films'), request('/api/trash')]);
+    const [result, deleted, refresh] = await Promise.all([request('/api/films'), request('/api/trash'), request('/api/kinopoisk/refresh-planned')]);
+    showPlannedRefresh(refresh.refresh);
     if (JSON.stringify(result.films) !== JSON.stringify(films) || JSON.stringify(deleted.films) !== JSON.stringify(trash) || $('film-list').getAttribute('aria-busy') === 'true') {
       films = result.films; trash = deleted.films; render();
     }
@@ -205,6 +215,61 @@ function toast(message, action = null) {
   toastTimer = setTimeout(() => { $('toast').hidden = true; undoAction = null; }, action ? 10000 : 5500);
 }
 function make(tag, className, text) { const e = document.createElement(tag); if (className) e.className = className; if (text !== undefined) e.textContent = text; return e; }
+let plannedRefreshTimer, plannedRefreshState = { status: 'idle' };
+function showPlannedRefresh(state) {
+  plannedRefreshState = state;
+  clearTimeout(plannedRefreshTimer);
+  const running = state.status === 'running';
+  const count = films.filter(f => !f.watched && !f.deletedAt).length;
+  $('refresh-planned').disabled = running || !count;
+  $('refresh-planned').setAttribute('aria-busy', String(running));
+  $('refresh-planned-label').textContent = running ? 'Обновляем непросмотренные…' : 'Обновить непросмотренные';
+  $('refresh-planned-count').textContent = running ? `${state.processed}/${state.total}` : String(count);
+  $('stop-planned-refresh').hidden = !running;
+  $('stop-planned-refresh').disabled = state.stopRequested;
+  $('stop-planned-refresh').textContent = state.stopRequested ? 'Останавливаем…' : 'Остановить';
+  $('planned-refresh-progress').hidden = !running;
+  $('planned-refresh-progress').max = Math.max(state.total, 1);
+  $('planned-refresh-progress').value = state.processed;
+  const status = $('planned-refresh-status');
+  status.dataset.status = state.status;
+  if (state.status === 'idle') status.textContent = 'Оценки, рецензии, доступность и описания в пустых заметках.';
+  else {
+    const label = running ? `Обработано ${state.processed} из ${state.total}` : state.status === 'completed' ? 'Обновление завершено'
+      : state.status === 'stopped' ? 'Обновление остановлено' : state.status === 'failed' ? 'Не удалось завершить обновление' : 'Обновление приостановлено';
+    const counts = `Проверено: ${state.checked} · описаний добавлено: ${state.notesAdded}${state.skipped ? ` · пропущено: ${state.skipped}` : ''}${state.errors ? ` · неполных проверок: ${state.errors}` : ''}`;
+    const reason = state.reason === 'blocked' ? ' Кинопоиск ограничил запросы; повторите позже.'
+      : state.reason === 'network-error' ? ' Источник не отвечает; повторите позже.' : state.reason === 'disabled' ? ' Сетевые проверки отключены на сервере.' : '';
+    status.textContent = `${label}. ${counts}.${running && state.currentTitle ? ` Сейчас: ${state.currentTitle}.` : ''}${reason}`;
+  }
+  if (running) plannedRefreshTimer = setTimeout(pollPlannedRefresh, 1500);
+}
+async function pollPlannedRefresh() {
+  try {
+    const { refresh } = await request('/api/kinopoisk/refresh-planned');
+    const finished = plannedRefreshState.status === 'running' && refresh.status !== 'running';
+    showPlannedRefresh(refresh);
+    if (finished) await load();
+  } catch {
+    $('planned-refresh-status').textContent = 'Нет связи с сервером. Проверяем состояние обновления…';
+    plannedRefreshTimer = setTimeout(pollPlannedRefresh, 4000);
+  }
+}
+$('refresh-planned').addEventListener('click', async () => {
+  $('refresh-planned').disabled = true;
+  try {
+    const { refresh } = await request('/api/kinopoisk/refresh-planned', { method: 'POST', body: '{}' });
+    showPlannedRefresh(refresh);
+    if (refresh.status !== 'running') await load();
+  } catch (error) { $('planned-refresh-status').textContent = error.message; $('refresh-planned').disabled = false; }
+});
+$('stop-planned-refresh').addEventListener('click', async () => {
+  $('stop-planned-refresh').disabled = true;
+  try {
+    const { refresh } = await request('/api/kinopoisk/refresh-planned/stop', { method: 'POST', body: '{}' });
+    showPlannedRefresh(refresh);
+  } catch (error) { $('planned-refresh-status').textContent = error.message; $('stop-planned-refresh').disabled = false; }
+});
 function copyTorrentMessage(text) {
   // films.loc uses HTTP on the LAN: the Clipboard API requires HTTPS.
   // The synchronous fallback also keeps the Telegram link in the original user gesture.
@@ -224,6 +289,7 @@ function copyTorrentMessage(text) {
   }
 }
 function render() {
+  showPlannedRefresh(plannedRefreshState);
   const watched = films.filter(f => f.watched).length;
   $('summary').textContent = `${films.length - watched} в планах · ${watched} уже посмотрели`;
   const query = $('search').value.trim();
@@ -359,7 +425,7 @@ $('add-form').addEventListener('submit', async event => {
     if (!title) throw new Error('Введите название фильма.');
     if (looksLikeLink(title)) throw new Error('Не удалось заполнить название по ссылке. Введите его вручную в верхней строке.');
     const { film } = await request('/api/films', { method: 'POST', body: JSON.stringify({ title, note: $('add-note').value, kinopoiskUrl: $('add-url').value, releaseYear: $('add-year').value ? Number($('add-year').value) : null, kinopoiskAvailabilityOverride: $('add-availability').value === 'auto' ? null : $('add-availability').value }) });
-    films.push(film); $('add-form').reset(); resetLookup(); autoTitle = autoYear = null; $('season-fields').hidden = true; $('add-details').open = false;
+    films.push(film); $('add-form').reset(); resetLookup(); autoTitle = autoYear = autoNote = null; $('season-fields').hidden = true; $('add-details').open = false;
     if (kindFilter !== 'all' && filmKind(film) !== kindFilter) { kindFilter = 'all'; rememberKind(); }
     filter = 'all'; $('search').value = ''; updateTabs(); render(); toast('Добавлено в планы'); $('add-title').focus();
   } catch (e) { errorIn('add-error', e); }

@@ -39,7 +39,7 @@ function nonnegativeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-export function parseKinopoiskRating(html, id) {
+function mainCardEntity(html, id) {
   if (!Number.isSafeInteger(id) || id < 1) return null;
   const { nextData, state } = extractKinopoiskPublicState(html);
   if (!state) return null;
@@ -52,6 +52,35 @@ export function parseKinopoiskRating(html, id) {
   const entity = state[key];
   const root = state.ROOT_QUERY?.[`${rootField}({"id":${id}})`];
   if (entity?.__typename !== type || entity.id !== id || root?.__ref !== key) return null;
+  return { entity, type };
+}
+
+function plainDescription(value) {
+  if (typeof value !== 'string') return '';
+  const entities = { nbsp: ' ', amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', laquo: '«', raquo: '»', ndash: '–', mdash: '—', hellip: '…' };
+  const text = value.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ').replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+      if (!entity.startsWith('#')) return entities[entity.toLowerCase()] ?? match;
+      const point = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : '';
+    }).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/gu, ' ').trim();
+  return text.length > 3000 ? text.slice(0, 2999).replace(/[\ud800-\udbff]$/, '') + '…' : text;
+}
+
+export function parseKinopoiskDescription(html, id) {
+  const card = mainCardEntity(html, id);
+  if (!card) return null;
+  for (const field of ['shortDescription', 'synopsis']) {
+    const text = plainDescription(card.entity[field]);
+    if (text) return { text, sourceField: field };
+  }
+  return { text: '', sourceField: null };
+}
+
+export function parseKinopoiskRating(html, id) {
+  const card = mainCardEntity(html, id);
+  if (!card) return null;
+  const { entity, type } = card;
   const rating = entity.rating?.kinopoisk;
   if (!rating || typeof rating.isActive !== 'boolean') return null;
   if (rating.isActive && rating.value !== null && !(typeof rating.value === 'number' && Number.isFinite(rating.value) && rating.value > 0 && rating.value <= 10)) return null;

@@ -12,7 +12,7 @@ The server reads the following environment variables. It does not load `.env` fi
 | `PORT` | `8766` | HTTP port. |
 | `FILMS_DATA_DIR` | `<project>/data` | SQLite, backups, and runtime files. Use an absolute path for predictable service setups. |
 | `FILMS_AVAILABILITY_NETWORK` | enabled | Set to `0` to disable outbound Kinopoisk availability checks and background sweeps. Cached results and manual choices remain readable. |
-| `FILMS_RATINGS_NETWORK` | enabled | Set to `0` to disable rating/review lookups and their background sweeps. Previously cached scores remain readable. This is independent of streaming-availability checks. |
+| `FILMS_RATINGS_NETWORK` | enabled | Set to `0` to disable rating/review/description lookups and their background sweeps. Previously cached fields remain readable. This is independent of streaming-availability checks. |
 
 ### Windows
 
@@ -87,6 +87,8 @@ Open the site in Safari, then use **Share → Add to Home Screen**. A web manife
 | Metadata fields stay empty | Inspect the message under the form. Wikidata might have no exact match, original title, or season date. Manual entry still works. |
 | Kinopoisk shows a question mark | The source could not confirm an offer. Open the editor to retry, inspect the check time, or set a manual confirmation. Challenges are never treated as proof of unavailability. |
 | A score or review counter shows `—` | The score may be unpublished, or the source could not provide the field. The editor can refresh the main card's Kinopoisk data. Missing values are not converted to zero. |
+| A description does not fill the note | The exact Kinopoisk card may have no public description or its response may be unavailable. Existing manual notes are preserved. You can always type your own text. |
+| Planned refresh pauses | Inspect the reason below **Обновить непросмотренные**. Wait before retrying a source limit, or restore connectivity. Completed writes remain stored. Closing the browser does not stop the job; use **Остановить**. |
 | An edit is rejected | Another device changed the same entry. Reload and retry using the current version. |
 | Telegram opens without a query | Start the bot if necessary, paste the copied query, then press Send. Client support for prepared text varies. |
 | Clipboard fallback appears | Select/copy the shown text manually. The LAN HTTP site cannot rely on the modern HTTPS-only Clipboard API. |

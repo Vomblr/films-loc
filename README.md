@@ -29,6 +29,8 @@ The interface is intentionally small: one page, readable text, generous touch ta
 | Metadata lookup | A Kinopoisk card ID resolves to Russian and original titles and a release year through a small reviewed cache or Wikidata. No API key. |
 | Watch on Kinopoisk | Checks the public streaming catalogue when a link is added. A play button means confirmed availability; unavailable and unknown results stay distinct. |
 | Rating & viewer reviews | Automatically loads the Kinopoisk score and positive/negative viewer-review counts. Small colored badges keep them readable without a poster grid. |
+| Automatic descriptions | A Kinopoisk link fills the note with the matching card's short description, with a synopsis fallback. Your own note remains editable and is preserved. |
+| Refresh planned titles | One button refreshes scores, viewer reviews and availability for all unwatched entries, and fills empty notes. Server-side progress survives a closed tab; you can stop the pass. |
 | Sensible years | Films use the earliest known premiere; series use the first broadcast year; selected seasons use their own release year. |
 | Watch history | Stores the viewing date separately from the timestamp when the watched mark was added. Unknown historical dates can stay empty. |
 | Search & sorting | Combine All / Movies / Series with watch status and search. Counters reflect the current filters; the type choice is remembered in this browser. Sort by viewing date, title, or imported order. Planned items remain above watched items. |
@@ -97,7 +99,7 @@ See [the self-hosting guide](docs/self-hosting.md) for binding, DNS, a reverse p
 
 1. Paste a Kinopoisk card link into the top input, or type a film name.
 2. Review the title and year. For a specific season, enter its number; leave the season empty for the whole series.
-3. Add a short note and press **+**.
+3. Review the description filled into the note, edit it if needed, and press **+**.
 4. Tap the circle after watching. The entry moves below planned items.
 5. Use **⋯** to edit the viewing date, change details, or move the entry to Trash.
 
@@ -122,6 +124,18 @@ The production year is not used as a substitute. If a season date is missing, th
 Wikidata coverage is incomplete. The earliest known release can differ from a more complete film database, and planned dates can change. The form shows the source; check it when precision matters. Automatically fetched fields do not overwrite manual changes made during the request. **Заполнить** explicitly refills the title and year.
 
 The small checked-in `metadata-catalog.json` contains only public examples. Remote results are cached in memory for up to a day.
+
+Descriptions come from the exact public Kinopoisk card, independently of whether its rating is published. The app prefers `shortDescription`, falls back to `synopsis`, converts markup/entities to plain text, and respects the 3,000-character note limit. The note is filled only when empty or still equal to the previous automatic value. Manual input made before or during a lookup is preserved, including when **Заполнить** is pressed. A selected season keeps its own release-year rule; its description refers to the linked series card.
+
+<p align="center"><img src="docs/images/description-autofill.jpg" alt="Mobile add form with a title, premiere year, short Kinopoisk description, rating and viewer reviews filled automatically" width="340"></p>
+
+### Refresh every unwatched title
+
+Use **Обновить непросмотренные** below the search and sorting controls. The count covers the entire active unwatched catalogue, regardless of the current search, type or status filter. It forces fresh rating, viewer-review and streaming checks, fills empty notes, and preserves existing notes, titles, years, watch history and manual availability choices. Additional card links receive separate score/review updates.
+
+Only one pass runs at a time. Progress and **Остановить** remain available after reloading the page; closing a tab does not stop the server job. Items watched or moved to Trash while the queue is running are skipped. Network errors or source challenges pause the pass instead of repeatedly retrying. A new click starts a new pass; already confirmed cache fields survive rating-source failures. Before each pass the server saves a fresh private JSON snapshot in `data/backups/before-planned-refresh-<id>.json`. A server restart interrupts an active pass; completed field updates remain stored.
+
+<p align="center"><img src="docs/images/planned-refresh.jpg" alt="Mobile planned-title refresh with server-side progress and a stop button" width="340"></p>
 
 ## Can I watch it on Kinopoisk?
 

@@ -8,6 +8,7 @@ import { validateFilm, toFilm, isPrivateAddress } from './lib.mjs';
 import { createMetadataLookup } from './metadata.mjs';
 import { createAvailabilityLookup } from './availability.mjs';
 import { createRatingsLookup } from './ratings.mjs';
+import { createPlannedRefresh } from './planned-refresh.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const lookupMetadata = createMetadataLookup({ catalog: JSON.parse(readFileSync(path.join(root, 'metadata-catalog.json'), 'utf8')) });
@@ -59,6 +60,18 @@ function filmWithAvailability(row) {
 }
 const allFilms = (trash = false) => db.prepare(`SELECT * FROM films WHERE deleted_at IS ${trash ? 'NOT ' : ''}NULL ORDER BY source_order`).all().map(filmWithAvailability);
 const snapshot = () => ({ schemaVersion: 4, exportedAt: new Date().toISOString(), films: allFilms(), trash: allFilms(true) });
+const plannedRefresh = createPlannedRefresh({ listFilms: allFilms,
+  getFilm: id => { const row = db.prepare('SELECT * FROM films WHERE id=?').get(id); return row ? toFilm(row) : null; },
+  fillEmptyNote: (film, description) => Boolean(db.prepare(`UPDATE films SET note=?,updated_at=?,version=version+1
+    WHERE id=? AND version=? AND watched=0 AND deleted_at IS NULL AND TRIM(note)='' AND kinopoisk_url=?`)
+    .run(description, new Date().toISOString(), film.id, film.version, film.kinopoiskUrl).changes),
+  ratings, availability,
+  beforeStart: () => {
+    dailyBackup();
+    // Unlike the first-of-day snapshot, this is a current, uniquely named recovery point.
+    writeFileSync(path.join(dataDir, 'backups', `before-planned-refresh-${randomUUID()}.json`), JSON.stringify(snapshot(), null, 2), { encoding: 'utf8', flag: 'wx' });
+  },
+});
 async function checkFilmAvailability(film) {
   if (film.kinopoiskUrl && !film.kinopoiskAvailabilityOverride && availability.peek(film.kinopoiskUrl).reason !== 'no-card')
     await availability.lookup({ url: film.kinopoiskUrl });
@@ -69,12 +82,12 @@ async function checkFilmRatings(film) {
 }
 let availabilityRefreshing = false, stopping = false;
 async function refreshAvailability() {
-  if (availabilityRefreshing || !availability.enabled || stopping) return;
+  if (availabilityRefreshing || !availability.enabled || stopping || plannedRefresh.running) return;
   availabilityRefreshing = true;
   try {
     const urls = new Set(allFilms().filter(f => !f.kinopoiskAvailabilityOverride && f.kinopoiskUrl).map(f => f.kinopoiskUrl));
     for (const url of urls) {
-      if (stopping) break;
+      if (stopping || plannedRefresh.running) break;
       if (availability.isFresh(url)) continue;
       const result = await availability.lookup({ url });
       if (result.reason === 'blocked' || result.reason === 'network-error') break;
@@ -85,12 +98,12 @@ async function refreshAvailability() {
 }
 let ratingsRefreshing = false;
 async function refreshRatings() {
-  if (ratingsRefreshing || !ratings.enabled || stopping) return;
+  if (ratingsRefreshing || !ratings.enabled || stopping || plannedRefresh.running) return;
   ratingsRefreshing = true;
   try {
     const urls = new Set([...allFilms(), ...allFilms(true)].flatMap(f => [f.kinopoiskUrl, ...f.additionalLinks.map(link => link.url)]).filter(Boolean));
     for (const url of urls) {
-      if (stopping) break;
+      if (stopping || plannedRefresh.running) break;
       if (ratings.isFresh(url)) continue;
       const result = await ratings.lookup({ url });
       if (['blocked', 'network-error'].includes(result.reason)) break;
@@ -152,6 +165,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { availability: await availability.lookup(await readBody(req)) });
     if (req.method === 'POST' && url.pathname === '/api/kinopoisk/ratings')
       return json(res, 200, { stats: await ratings.lookup(await readBody(req)) });
+    if (req.method === 'GET' && url.pathname === '/api/kinopoisk/refresh-planned')
+      return json(res, 200, { refresh: plannedRefresh.peek() });
+    if (req.method === 'POST' && url.pathname === '/api/kinopoisk/refresh-planned') {
+      await readBody(req);
+      return json(res, 202, { refresh: plannedRefresh.start() });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/kinopoisk/refresh-planned/stop') {
+      await readBody(req);
+      return json(res, 200, { refresh: plannedRefresh.stop() });
+    }
     if (req.method === 'GET' && url.pathname === '/api/export') {
       res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="films-${new Date().toISOString().slice(0, 10)}.json"` });
       return res.end(JSON.stringify(snapshot(), null, 2));
@@ -212,4 +235,5 @@ server.on('error', error => { console.error(error.message); process.exitCode = 1
 server.listen(port, bind, () => { console.log(`Films ready: http://127.0.0.1:${port} | data: ${dataDir}`); refreshAvailability(); refreshRatings(); });
 const availabilityTimer = setInterval(refreshAvailability, 15 * 60000); availabilityTimer.unref();
 const ratingsTimer = setInterval(refreshRatings, 15 * 60000); ratingsTimer.unref();
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; clearInterval(availabilityTimer); clearInterval(ratingsTimer); server.close(() => { db.close(); process.exit(0); }); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; plannedRefresh.stop(); clearInterval(availabilityTimer); clearInterval(ratingsTimer);
+  server.close(async () => { await plannedRefresh.settled(); db.close(); process.exit(0); }); });

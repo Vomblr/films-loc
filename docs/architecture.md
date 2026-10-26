@@ -24,7 +24,8 @@ The browser uses the same origin for assets and JSON endpoints. It keeps the cur
 | `lib.mjs` | Record validation, row conversion, private-address checks. |
 | `metadata.mjs` | Kinopoisk URL parsing, exact Wikidata ID matching, title/date selection, cache, timeouts, concurrency limit. |
 | `availability.mjs` | Exact-title Kinopoisk streaming-status parsing, persistent-cache interface, expiry, and in-flight deduplication. |
-| `ratings.mjs`, `ratings-parser.mjs` | Exact-title Kinopoisk rating and viewer-review parsing, independent field refresh, persistent cache, and expiry. |
+| `ratings.mjs`, `ratings-parser.mjs` | Exact-title Kinopoisk rating, viewer-review and description parsing, independent field refresh, persistent cache, and expiry. |
+| `planned-refresh.mjs` | Single unwatched-title refresh job, deduplication, live eligibility checks, progress, cancellation and source backoff. |
 | `kinopoisk-http.mjs` | Bounded public-page navigation and anonymous SSO, strict destination checks, temporary scoped cookies. |
 | `public/app.js` | Rendering, add/edit/watch/trash actions, metadata form state, clipboard fallback. |
 | `public/sort.mjs` | Planned/watched grouping and sort rules. |
@@ -66,6 +67,9 @@ All bodies and responses use JSON. Write requests must have `Content-Type: appli
 | `POST` | `/api/kinopoisk/lookup` | Fetch form metadata; does not save a record. |
 | `POST` | `/api/kinopoisk/availability` | Check `{ "url": "https://www.kinopoisk.ru/film/461939/", "refresh": false }`; returns `{ "availability": ... }`. Set `refresh: true` to bypass the result cache. |
 | `POST` | `/api/kinopoisk/ratings` | The same URL/refresh request shape; returns `{ "stats": ... }` for the exact linked title. Saving a new or changed card also checks its rating and viewer reviews. |
+| `GET` | `/api/kinopoisk/refresh-planned` | `{ "refresh": ... }` job state and progress. |
+| `POST` | `/api/kinopoisk/refresh-planned` | Start one server-side pass; send `{}`. Returns the current job with status 202. Repeated starts while running return that same job. |
+| `POST` | `/api/kinopoisk/refresh-planned/stop` | Send `{}` to request a stop after the in-flight lookup; completed writes are retained. |
 
 Example lookup:
 
@@ -112,6 +116,10 @@ An exact public Kinopoisk ID match is required. Ambiguous matches fail with a ma
 ## Boundaries
 
 Scores come from the matching `Film`/`TvSeries` entity in the public card's normalized Apollo state. The parser verifies the page ID, root query reference, entity ID, and type. SSR assignments are scanned as balanced JSON, with string escaping handled; source scripts are never executed. Only the Kinopoisk rating is read, not IMDb or critic ratings.
+
+The same exact-ID card response provides `shortDescription`, with a `synopsis` fallback. Description extraction is independent of the rating schema and visibility. `kinopoiskStats` also exposes `description`, `descriptionSource` and `descriptionCheckedAt`; failed requests retain the last successful text and its time. Legacy cache entries without this field are upgraded on their next lookup. Text is normalized and limited to 3,000 characters before filling the form. The browser guards against URL changes and manual note edits during a lookup; it never renders source markup as HTML.
+
+The manual refresh snapshots active unwatched IDs, then re-reads eligibility before each title and before filling a note. A conditional SQL update requires the same version and URL, `watched=0`, no Trash timestamp and an empty note; only that write advances the film version and `updatedAt`. Existing notes, title/year corrections and watch history are preserved. Additional card IDs are deduplicated across the pass; manual availability overrides skip their automatic streaming check. Automatic background sweeps yield while the manual pass runs. Each title's lookups are bounded; the queue is throttled, can be stopped, and pauses on a challenge or network error. In-memory job progress survives a browser reload, but is reset by a server restart.
 
 Viewer sentiments come from a same-ID `/film/ID/reviews/` page, including for series. Its own back-link, the unique sentiment block, per-sentiment links, integer counters, and internal total must agree. Legacy positive/negative counts are not combined with modern nonzero review totals. An explicit exact-ID modern total of zero can establish zero sentiments when the legacy counters are absent.
 

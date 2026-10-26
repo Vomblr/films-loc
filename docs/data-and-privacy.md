@@ -14,7 +14,7 @@ The checked-in `seed.json` is a demonstration authored for this repository. Its 
 | --- | --- | --- |
 | Uncached metadata lookup | `www.wikidata.org` | Public Kinopoisk ID, public entity IDs, and requested season relationships. |
 | Streaming availability check | Official Kinopoisk/HD pages and Yandex anonymous SSO hosts | Public card ID/URL and a fresh temporary anonymous session. The check also runs for existing linked titles. |
-| Rating / viewer-review check | Official Kinopoisk card and reviews pages, plus anonymous SSO hosts | Public title IDs/URLs. Only aggregate scores/counts are retained; review text and author profiles are not collected. |
+| Rating / viewer-review / description check | Official Kinopoisk card and reviews pages, plus anonymous SSO hosts | Public title IDs/URLs. Aggregate scores/counts and the card's short description/synopsis are retained; viewer-review text and author profiles are not collected. |
 | Open Kinopoisk | `www.kinopoisk.ru` | The chosen public card URL. |
 | Click torrent | `t.me/torrents_2_bot` | Russian/original title and the stored release year in the `text` query parameter. |
 
@@ -29,6 +29,10 @@ Use **Скачать копию** in the footer, or request `/api/export`. The e
 ### Daily snapshot
 
 The app writes `data/backups/YYYY-MM-DD.json` once per UTC day, on startup or before the first mutation. This is the **first snapshot of that day**, not a continuously updated copy. Use the export action for a current snapshot.
+
+### Before a manual planned-title refresh
+
+Every new **Обновить непросмотренные** pass also creates a uniquely named, current JSON snapshot under `data/backups/before-planned-refresh-<id>.json`. Automatic description filling changes only empty notes on still-unwatched, active entries; written notes and watch history are preserved. Treat these snapshots as private catalogue data. They are never included in Git.
 
 ### Complete database backup
 
